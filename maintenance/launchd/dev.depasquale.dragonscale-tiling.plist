@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>dev.depasquale.dragonscale-tiling</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>__HOME__/projects/vault-engine/maintenance/run-tiling-check.sh</string>
+    </array>
+
+    <!-- Sun 03:30 — 30 minutes after wiki-maintenance, so qwen2.5:7b
+         has had time to finish + unload before nomic-embed-text loads.
+         RunAtLoad covers boot/login. Heavier than wiki-maintenance
+         (embeds N pages) so Nice 12. -->
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Weekday</key>
+        <integer>0</integer>
+        <key>Hour</key>
+        <integer>3</integer>
+        <key>Minute</key>
+        <integer>30</integer>
+    </dict>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <key>Nice</key>
+    <integer>12</integer>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/opt/homebrew/bin:/usr/bin:/bin</string>
+    </dict>
+
+    <key>StandardOutPath</key>
+    <string>__HOME__/Library/Logs/dragonscale-tiling.launchd.stdout</string>
+
+    <key>StandardErrorPath</key>
+    <string>__HOME__/Library/Logs/dragonscale-tiling.launchd.stderr</string>
+</dict>
+</plist>

@@ -1,0 +1,50 @@
+name: ci
+
+# The pytest suite and a byte-compile of every script, on every pull request
+# and every push to main. Python comes from the runner image; the test
+# dependencies (pytest, pyyaml) are resolved by uv exactly as
+# maintenance/run-tests.sh does locally.
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+# Read-only: nothing here writes to the repo, publishes or mints a token.
+permissions:
+  contents: read
+
+# Keep `github.ref` in the key (a ref-less group lets pull requests evict each
+# other's runs); cancel only superseded pull-request pushes, never main.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # Pinned release binary, like the scanners in ci-security.yml.
+      - name: Install uv
+        env:
+          # renovate: datasource=github-releases depName=astral-sh/uv
+          UV_VERSION: 0.12.17
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/bin"
+          curl -fsSL "https://github.com/astral-sh/uv/releases/download/${UV_VERSION}/uv-x86_64-unknown-linux-gnu.tar.gz" \
+            | tar -xz -C "$RUNNER_TEMP/bin" --strip-components=1 uv-x86_64-unknown-linux-gnu/uv
+          echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
+
+      - name: Byte-compile every script
+        run: python3 -m py_compile scripts/*.py maintenance/*.py eval/*.py
+
+      - name: Tests
+        run: bash maintenance/run-tests.sh

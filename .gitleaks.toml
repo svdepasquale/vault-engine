@@ -1,0 +1,11 @@
+title = "gitleaks config — vault-engine"
+
+# Inherit the default ruleset (recommended by upstream).
+[extend]
+useDefault = true
+
+# No allowlist: the test fixtures under maintenance/tests and the test
+# sources scan clean with the default rules. If a fixture ever trips one, add
+# a `[[allowlists]]` entry scoped with BOTH `targetRules` and `paths`, with a
+# comment saying why. Never a bare `paths` allowlist: it takes the file out of
+# scope for every rule, so a real key pasted into it later is never scanned.
