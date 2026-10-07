@@ -224,6 +224,11 @@ rm -f "$AUTOFIX_REPORT"
 # 2b. deterministic lint (post-autofix)
 REPORT="$LINT_DIR/report.json"
 "$SCRIPTS/wiki-lint.py" > "$REPORT"
+# Relation findings stay out of the LLM pass: a session-start hook shows them
+# to Claude (wiki-lint.py --brief), and the judge would only defer a proposal
+# that edits relations: (not a whitelisted field).
+jq '.findings |= map(select(.type | startswith("relation_") | not))' "$REPORT" > "$REPORT.tmp" \
+  && mv "$REPORT.tmp" "$REPORT"
 COUNT=$(jq '.findings | length' "$REPORT")
 SHA=$(jq -r '.vault_sha' "$REPORT")
 echo "findings=$COUNT vault_sha=$SHA"
