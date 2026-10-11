@@ -45,7 +45,7 @@ trap 'on_error $LINENO' ERR
 
 # 0. local-patch sentinel. Vault retrieval scripts are a vendored fork of
 #    the claude-obsidian plugin scripts (local patches v1.7.3/v1.7.4/v1.7.5 —
-#    see wiki/entities/dragonscale-memory.md). The plugin is uninstalled
+#    recorded in the vault). The plugin is uninstalled
 #    since 2026-09-25, but a manual re-vendor would still silently revert them: retrieval keeps working,
 #    just at ~12x the token cost. Fail loud here instead of failing silent.
 #

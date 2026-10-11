@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """recall.py — per-prompt vault recall for a Claude Code UserPromptSubmit hook.
 
-Experiment started 2026-09-26 (see [[2026-09-25-memory-architecture-review]]).
+Experiment started 2026-09-26 (rationale and calibration: the vault's CLAUDE.md §Per-prompt recall).
 On every user prompt the hook runs the normal local retrieval (retrieve.py:
 BM25 + on-demand llama-embedding rerank, ~1 s, nothing resident) and injects a
 SHORT pointer — page, section, one matching line — only when a chunk clears an

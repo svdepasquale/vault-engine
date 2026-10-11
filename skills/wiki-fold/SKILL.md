@@ -24,7 +24,7 @@ A fold is **additive**: child log entries and their referenced pages are never m
 > that left ~96% of the operation log unreachable. Sections 1, 2 and 6 below are
 > patched for the real format. Since 2026-09-25 this copy is the only one: the
 > claude-obsidian plugin is uninstalled and `~/.claude/skills/wiki-fold` is a
-> symlink to this directory. See [[claude-obsidian-divergence]].
+> symlink to this directory (patch history: in the vault).
 
 ## Scope boundary (explicit)
 

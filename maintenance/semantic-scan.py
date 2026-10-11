@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """semantic-scan.py — local-LLM semantic consistency scan of the vault (pilot).
 
-Pilot started 2026-09-26 ([[2026-09-25-memory-architecture-review]]). Three
+Pilot started 2026-09-26 (record and runs: the vault's CLAUDE.md §Semantic scan). Three
 stages, run by hand now and then:
 
 1. Candidate pairs (no model): passages from DIFFERENT pages whose cached

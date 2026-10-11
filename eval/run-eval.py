@@ -60,7 +60,7 @@ honest ranking. Do not "fix" this by re-inflating the page.
 
 The 2026-07-29 single-nomic baseline was R@1 0.88 / R@3 1.00 / MRR 0.925 against
 a gold set that has since been corrected (the hot-cache query gained
-feedback-vault-design.md, which genuinely answers it), so it is NOT comparable
+a profile page that genuinely answers it), so it is NOT comparable
 line-for-line. On the corrected set single-nomic scores 0.90 / 1.00 / 0.938 EN
 and 0.65 / 0.88 / 0.754 IT.
 """
