@@ -8,8 +8,9 @@ stages, run by hand now and then:
    qwen3 vectors are very similar — where duplicates, contradictions and stale
    copies of the same fact live. Archive-like pages (folds, log, hot, indexes,
    dated meta syntheses, lint/tiling reports) are excluded.
-2. Judgment: a local generative model (LM Studio, qwen/qwen3.8-27b by default,
-   reasoning_effort "none") labels each pair — contradiction / stale /
+2. Judgment: with --dump no model runs and Claude judges the written-out pairs;
+   otherwise a local generative model (LM Studio, qwen/qwen3.8-27b by default,
+   or WIKI_SCAN_URL; reasoning_effort "none") labels each pair — contradiction / stale /
    duplicate / none — and must quote the lines that prove it. Each passage
    comes with its neighbouring chunks. Missing links are computed without the
    model (similar passages, no link either way).
@@ -180,6 +181,31 @@ def parse(content):
         return None
 
 
+def dump(pairs, top, out):
+    """Stage 1 only, for Claude as the judge: the strongest passage pairs (the
+    matched chunks; the neighbours are one Read away by chunk id), each page's
+    updated date and link flags, then every page pair above the cosine floor
+    that links neither way. On its first use (30 pairs) Claude found about ten
+    real issues where the local judge found three, among ten proposals."""
+    lines, unlinked = [], []
+    for k, (s, pa, da, pb, db) in enumerate(pairs, 1):
+        upd_a, links_a = page_meta(pa)
+        upd_b, links_b = page_meta(pb)
+        a2b, b2a = Path(pb).stem in links_a, Path(pa).stem in links_b
+        if not (a2b or b2a):
+            unlinked.append(f"- {s:.3f}  {pa}  <>  {pb}  [{da['_id']} | {db['_id']}]")
+        if k > top:
+            continue
+        lines += [f"## {k}. cos {s:.3f} — {pa} (updated {upd_a}, links B: {'yes' if a2b else 'no'}) "
+                  f"<> {pb} (updated {upd_b}, links A: {'yes' if b2a else 'no'})", "",
+                  f"### A `{da['_id']}`", "", da.get("raw_text", "").strip(), "",
+                  f"### B `{db['_id']}`", "", db.get("raw_text", "").strip(), ""]
+    lines += [f"## Page pairs linking neither way ({len(unlinked)} of {len(pairs)})", ""] + unlinked
+    out.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    print(f"{min(top, len(pairs))} passage pairs, {len(unlinked)} unlinked page pairs -> {out}")
+    return 0
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--pairs", type=int, default=30)
@@ -189,15 +215,20 @@ def main():
     ap.add_argument("--reasoning", default="none",
                     help='reasoning_effort sent to LM Studio ("none", "low", ...; "" to omit)')
     ap.add_argument("--dry", action="store_true", help="list candidate pairs and exit")
+    ap.add_argument("--dump", metavar="PATH",
+                    help="no model: write the top --pairs passage pairs and every page pair above "
+                         "--min-cos that links neither way to PATH, for Claude to judge")
     ap.add_argument("--out", default=str(VAULT_ROOT / "wiki" / ".lint" / "semantic-proposals.md"))
     ap.add_argument("--json", default=None, help="raw results JSON path")
     args = ap.parse_args()
 
-    pairs = load_pairs(args.pairs, args.min_cos)
+    pairs = load_pairs(10 ** 6 if args.dump else args.pairs, args.min_cos)
     if not pairs:
         print(f"no candidate pairs: no cached vectors under {QKEY!r}? run "
               "`python3 ~/projects/vault-engine/scripts/rerank.py --embed-all` first", file=sys.stderr)
         return 2
+    if args.dump:
+        return dump(pairs, args.pairs, Path(args.dump))
     if args.dry:
         for s, pa, da, pb, db in pairs:
             print(f"{s:.3f}  {pa}  <>  {pb}")
