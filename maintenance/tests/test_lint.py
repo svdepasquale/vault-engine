@@ -51,6 +51,24 @@ def test_unlinked_page_is_still_orphan(lint_module, tmp_path, monkeypatch):
     assert orphans == {"runbooks/x.md"}
 
 
+def test_wikilink_syntax_inside_code_is_not_a_link(lint_module, tmp_path, monkeypatch):
+    # A page that writes about the syntax quotes it in code. Before the fix the
+    # quoted `[[x]]` was a dead link, and the bare `[[` opened a match that ran
+    # past `#9` and swallowed the real [[b]], leaving b an orphan.
+    body = ("the syntax is `[[x]]`, and ``[[y]]`` too; files that contain `[[` need care (#9); see [[b]]\n"
+            "```\n[[fenced]]\n```\n")
+    write(tmp_path / "entities/a.md", PAGE.format(n="a", body=body))
+    write(tmp_path / "entities/b.md", PAGE.format(n="b", body="back to [[a]]"))
+    findings = run(lint_module, monkeypatch)
+    assert [f for f in findings if f["type"] in ("dead_link", "orphan")] == []
+
+
+def test_a_real_link_next_to_code_still_counts(lint_module, tmp_path, monkeypatch):
+    write(tmp_path / "entities/a.md", PAGE.format(n="a", body="run `x --y` then read [[missing]]"))
+    findings = run(lint_module, monkeypatch)
+    assert [f["target"] for f in findings if f["type"] == "dead_link"] == ["missing"]
+
+
 def graph_page(n: str, typ: str = "entity", fm: str = "") -> str:
     return f"---\nname: {n}\ndescription: d\ntype: {typ}\n{fm}---\nbody\n"
 

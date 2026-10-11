@@ -31,6 +31,15 @@ ALLOWED_TYPES = {"user", "feedback", "entity", "source", "meta"}
 SKIP_ORPHAN = {"index.md", "log.md", "hot.md", "overview.md", "_index.md", "WIKI.md"}
 WIKILINK = re.compile(r"\[\[([^\]|#]+)(?:[|#][^\]]*)?\]\]")
 FRONTMATTER = re.compile(r"^---\n(.*?)\n---", re.DOTALL)
+# Code is not a link: a page that quotes the syntax (`[[x]]`, a bare `[[`) or
+# shows it in a fenced block must not report a dead link, and a bare `[[` must
+# not open a match that runs on and swallows the next real link.
+FENCED = re.compile(r"^(```|~~~).*?^\1[^\n]*$", re.DOTALL | re.MULTILINE)
+INLINE_CODE = re.compile(r"(`+)[^\n]*?(?<!`)\1(?!`)")
+
+
+def strip_code(body: str) -> str:
+    return INLINE_CODE.sub("", FENCED.sub("", body))
 TODAY = date.today()
 
 # Typed-graph vocabulary (the vault's CLAUDE.md §Typed graph). A predicate with
@@ -136,7 +145,7 @@ def main(brief: bool = False):
         fm_cache[p] = parse_fm(text)
         rel_cache[p] = parse_relations(text)
         by_slug.setdefault(slug(p), []).append(p)
-        body = FRONTMATTER.sub("", text, count=1)
+        body = strip_code(FRONTMATTER.sub("", text, count=1))
         for m in WIKILINK.finditer(body):
             tgt = m.group(1).strip()
             targets.setdefault(tgt, set()).add(p)
