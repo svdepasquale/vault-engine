@@ -94,6 +94,8 @@ VAULT = Path(os.environ.get("WIKI_VAULT") or Path.home() / "projects" / "knowled
 # top-K so the documented `run-eval.py [K]` invocation is unchanged. Relative
 # paths resolve against the vault's eval/ (the gold sets are vault data), not the cwd.
 _args = sys.argv[1:]
+if {"-h", "--help"} & set(_args):
+    sys.exit(__doc__)
 GOLD = VAULT / "eval" / "goldset.json"
 ENGINE = Path(__file__).resolve().parent.parent
 if "--gold" in _args:
