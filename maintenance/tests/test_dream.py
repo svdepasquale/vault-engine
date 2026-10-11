@@ -2,7 +2,7 @@
 answer parsing, quote checks, ledger, rendering). The model call is not
 exercised here; the pilot run is its test.
 
-Run: <vault>/maintenance/run-tests.sh
+Run: <engine>/maintenance/run-tests.sh
 """
 from __future__ import annotations
 import importlib.util, json, random, sys

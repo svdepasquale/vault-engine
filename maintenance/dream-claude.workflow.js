@@ -1,8 +1,9 @@
 // dream-claude.workflow.js — stage 2 of the vault dream: Claude proposes when the
 // local model (maintenance/dream.py) yields nothing that survives review.
 // Run from Claude Code (multi-agent: needs the user's explicit go):
-//   Workflow({scriptPath: "<vault>/maintenance/dream-claude.workflow.js",
-//             args: {date: "YYYY-MM-DD", ledger: [...titles + reasons], pending: [...],
+//   Workflow({scriptPath: "<engine>/maintenance/dream-claude.workflow.js",
+//             args: {vault: "<vault>", engine: "<engine>", repos: [...], date: "YYYY-MM-DD",
+//                    ledger: [...titles + reasons], pending: [...],
 //                    maxCandidates: 8, pairs: [...] /* optional; default: dream.py --dry */}})
 // Every agent is read-only; Claude alone writes the ledger and files only what
 // the user approves. First run, numbers and review: wiki/meta/2026-10-03-dream-pilot.md.
@@ -37,7 +38,7 @@ const COMMON = `You are working on the user's personal knowledge vault at ${VAUL
 
 ADVISOR: do not call the advisor tool unless you are stuck after two or more serious attempts or face a security-critical decision (the user's model-routing rule: never for routine) — not as an end-of-task check. On the first run 45 of 56 agents called it routinely, about 29% of the run's cost.
 
-READ-ONLY. Do not Edit or Write any file, do not run any command that changes a file or git state, and do not run the model stages of the dream scripts. Other sessions may be writing to this repo. Read files with Read; search the vault with \`cd ${VAULT} && python3 scripts/retrieve.py "<English query>" --top 3 --chunks --compact\` (its index may lag today's edits, so open the live page with Read before relying on a chunk). Code repos you may read, read-only: ${REPOS}, and ${ENGINE} (the vault's own code).`
+READ-ONLY. Do not Edit or Write any file, do not run any command that changes a file or git state, and do not run the model stages of the dream scripts. Other sessions may be writing to this repo. Read files with Read; search the vault with \`WIKI_VAULT=${VAULT} python3 ${ENGINE}/scripts/retrieve.py "<English query>" --top 3 --chunks --compact\` (its index may lag today's edits, so open the live page with Read before relying on a chunk). Code repos you may read, read-only: ${REPOS}, and ${ENGINE} (the vault's own code).`
 
 const CLASSES = `A local-model pilot (wiki/meta/2026-10-03-dream-pilot.md) produced 29 ideas and every one died in review. The ways they died — check each one BEFORE you propose anything:
 1. Reverses a recorded decision (a page says "deliberately", "user decision", "decided", "rejected", "accepted risk", "NOT", "do not build it"). Example: moving a job back to a local model when a page records that it was moved to a hosted API on purpose.

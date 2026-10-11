@@ -4,7 +4,7 @@ Runs against an isolated tmp_path vault so it doesn't touch the real
 knowledge-vault. Imports the script as a module by patching VAULT/
 LINT_DIR before the call.
 
-Run: <vault>/maintenance/run-tests.sh
+Run: <engine>/maintenance/run-tests.sh
 """
 from __future__ import annotations
 import importlib.util, json, sys

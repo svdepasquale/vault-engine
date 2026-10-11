@@ -3,7 +3,7 @@
 Runs against an isolated tmp_path vault so it never touches the real
 knowledge-vault.
 
-Run: <vault>/maintenance/run-tests.sh
+Run: <engine>/maintenance/run-tests.sh
 """
 from __future__ import annotations
 import importlib.util, json, sys
