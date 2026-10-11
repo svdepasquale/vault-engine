@@ -47,7 +47,9 @@ QKEY = f"{_rerank.LOCAL_TAG}text-embedding-qwen3-embedding-0.6b:{_rerank.EMBED_S
 SKIP = re.compile(r"^wiki/(folds/|log\.md|hot\.md|index\.md|.*_index\.md|"
                   r"meta/(lint-report|tiling-report|20\d\d-))")
 LINK = re.compile(r"\[\[([^\]|#]+)")
-API = "http://127.0.0.1:1234/v1/chat/completions"
+# LM Studio on this Mac by default; WIKI_SCAN_URL points the judge at a remote
+# llama-server instead (e.g. http://<llm-box>:8080; pass --model as it lists it).
+API = (os.environ.get("WIKI_SCAN_URL") or "http://127.0.0.1:1234").rstrip("/") + "/v1/chat/completions"
 
 PROMPT = """You check a technical wiki (a knowledge base curated by Claude) for consistency between two passages from DIFFERENT pages.
 
@@ -153,6 +155,8 @@ def ask(prompt, model, max_tokens, reasoning):
                "stream": False, "messages": [{"role": "user", "content": prompt}]}
     if reasoning:
         payload["reasoning_effort"] = reasoning
+        # llama-server honours this one instead (dream.py measured both: 0 reasoning tokens)
+        payload["chat_template_kwargs"] = {"enable_thinking": reasoning != "none"}
     body = json.dumps(payload).encode()
     req = urllib.request.Request(API, data=body, headers={"Content-Type": "application/json"})
     t0 = time.time()

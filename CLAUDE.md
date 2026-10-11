@@ -18,7 +18,7 @@ skills/        save, wiki-apply (live), wiki-fold (retired record)
 
 ## Public repo (since 2026-10-07)
 
-- **Nothing from the private vault goes in** — no page names, hosts, machines, services, people or quotes in code, comments, tests, commit messages or issues. Machine-specific values come from the environment (`WIKI_VAULT`, `WIKI_LINT_EVO_URL`, `WIKI_DREAM_EVO_URL`) or from the vault itself (`maintenance/dream-context.md`, the dream workflow's `args.repos`). Synthetic data only in tests.
+- **Nothing from the private vault goes in** — no page names, hosts, machines, services, people or quotes in code, comments, tests, commit messages or issues. Machine-specific values come from the environment (`WIKI_VAULT`, `WIKI_LINT_EVO_URL`, `WIKI_DREAM_EVO_URL`, `WIKI_SCAN_URL`) or from the vault itself (`maintenance/dream-context.md`, the dream workflow's `args.repos`). Synthetic data only in tests.
 - **This clone is the one in use**: the hooks, the skills and Claude's read protocol run `~/projects/vault-engine/...` directly. Change the code here, never in a copy, and never add code back to the vault.
 - Commits: `area: short imperative subject`, signed (a ruleset requires it; another blocks force-push and deletion of `main`). Direct pushes to `main`. CI: `ci.yml` (byte-compile + tests), `ci-security.yml` (gitleaks, actionlint, zizmor).
 
