@@ -3,7 +3,7 @@
 # hour; maintenance/launchd/README.md). Runs deterministic
 # lint, then asks an LLM to draft conservative fix proposals: local LM
 # Studio with qwen/qwen3.8-27b by default (since 2026-08-27), a remote
-# llama-server (Qwen3-Coder-Next) only with WIKI_LINT_BACKEND=evo + WIKI_LINT_EVO_URL, and no fallback
+# llama-server (Qwen3.8-Flash-Next) only with WIKI_LINT_BACKEND=evo + WIKI_LINT_EVO_URL, and no fallback
 # between them (step 0b). Never writes inside the vault; only deposits a
 # proposal file gated by a PENDING flag.
 set -euo pipefail
@@ -89,7 +89,7 @@ case "$LMS_URL" in http*) ;; *) LMS_URL="http://$LMS_URL" ;; esac
 #     through to a healthy-looking local path; if you asked for evo and evo
 #     is not serving the model, that is an error worth seeing.
 EVO_URL="${WIKI_LINT_EVO_URL:-}"   # e.g. http://<llm-box>:8080; required with WIKI_LINT_BACKEND=evo
-EVO_MODEL="${WIKI_LINT_EVO_MODEL:-Qwen3-Coder-Next}"
+EVO_MODEL="${WIKI_LINT_EVO_MODEL:-Qwen3.8-Flash-Next}"
 BACKEND="${WIKI_LINT_BACKEND:-lmstudio}"
 if [ "$BACKEND" = "evo" ] && [ -z "$EVO_URL" ]; then
   echo "ERROR: WIKI_LINT_BACKEND=evo needs WIKI_LINT_EVO_URL (e.g. http://<llm-box>:8080)."
@@ -124,8 +124,8 @@ llm_generate() {
   # is gone along with Ollama itself.
   #
   # Two switches against thinking-runaway, one per backend: llama-server
-  # (evo) honours chat_template_kwargs.enable_thinking (a verified no-op on
-  # Qwen3-Coder-Next, A/B 2026-07-18); LM Studio IGNORES it for
+  # (evo) honours chat_template_kwargs.enable_thinking (this payload: 0
+  # reasoning chars on Qwen3.8-Flash-Next, 2026-10-12); LM Studio IGNORES it for
   # qwen3.8-27b and honours reasoning_effort:"none" instead (measured
   # 2026-09-26: 0 reasoning tokens, "OK" in 0.6 s). Without it the model
   # spent the whole budget reasoning and answered nothing (2026-08-30, 09-15).

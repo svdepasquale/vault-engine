@@ -13,10 +13,10 @@ related but not linked and asks for ideas neither page contains. Stages:
    their descriptions did not. Archived/closed pages, profile pages and
    archive-like pages are never seeds; ~~struck-through~~ text is replaced by
    "[superseded]" so a dead plan is not built on.
-2. Dream: a local generative model (a remote llama-server or LM Studio, Qwen3.8
-   27B, thinking off unless --think) gets each page's description plus the
-   chunk that bridges to the other page, and returns 0-2 ideas as JSON, each
-   quoting both passages.
+2. Dream: a local generative model (Qwen3.8-Flash-Next on a remote
+   llama-server or Qwen3.8 27B in LM Studio, thinking off unless --think)
+   gets each page's description plus the chunk that bridges to the other
+   page, and returns 0-2 ideas as JSON, each quoting both passages.
 3. Checks (no model): an idea survives only if both quotes appear in the text
    the model was shown (Markdown-insensitive, as in semantic-scan.py). Every
    survivor gets its nearest vault chunk and nearest ledger entry with the raw
@@ -58,13 +58,13 @@ QWEN = "text-embedding-qwen3-embedding-0.6b"
 BACKENDS = {
     "lmstudio": ("http://127.0.0.1:1234", "qwen/qwen3.8-27b"),
     # URL from WIKI_DREAM_EVO_URL or WIKI_LINT_EVO_URL (the same box), e.g. http://<llm-box>:8080
-    "evo": (os.environ.get("WIKI_DREAM_EVO_URL") or os.environ.get("WIKI_LINT_EVO_URL") or "", "Qwen3.8-27B"),
+    "evo": (os.environ.get("WIKI_DREAM_EVO_URL") or os.environ.get("WIKI_LINT_EVO_URL") or "", "Qwen3.8-Flash-Next"),
 }
 DEAD = {"archived", "decommissioned", "superseded", "closed", "deprecated", "erased"}  # = contextual-prefix.py STALE_STATUSES
 SEED_SKIP = re.compile(r"^wiki/(meta/profile/|overview\.md)")
 STRUCK = re.compile(r"~~.+?~~", re.S)
 KINDS = ("automation", "simplification", "synergy", "experiment", "question")
-THINK_CAP = 8192    # the evo server's reasoning-budget for Qwen3.8-27B (its models.ini)
+THINK_CAP = 8192    # the evo server's reasoning-budget for Qwen3.8-Flash-Next (its models.ini)
 MIN_QUOTE = 15
 
 PROMPT = """You read two pages of a personal knowledge wiki and propose ORIGINAL ideas that come from putting them side by side.
@@ -221,9 +221,10 @@ def ask(url, model, prompt, max_tokens, temperature, think=None):
     # think=None: thinking off with both switches, as in wiki-maintenance.sh —
     # llama-server honours chat_template_kwargs.enable_thinking, LM Studio
     # ignores it for qwen3.8 and honours reasoning_effort "none" (measured
-    # 2026-09-26 on LM Studio, 2026-10-03 on evo: 0 reasoning tokens either
-    # way). think="low"/"medium": the qwen3.8 template's effort level (it
-    # rejects anything but xhigh|medium|low). The only hard cap is evo's
+    # 2026-09-26 on LM Studio, 2026-10-03 on evo with the 27B, 2026-10-12 with
+    # Flash-Next: 0 reasoning tokens either way). think="low"/"medium": the
+    # template's effort level (the 27B's rejects anything but xhigh|medium|low;
+    # Flash-Next verified with medium and low). The only hard cap is evo's
     # server-side reasoning-budget 8192 — a per-request reasoning_budget is
     # ignored (2026-10-03: 2224/2224 tokens spent reasoning with 1024 asked)
     # — so the answer gets its max_tokens on top of those 8192.
