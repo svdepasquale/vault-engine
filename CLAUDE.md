@@ -5,7 +5,7 @@ The code that runs Claude's long-term memory: retrieval, maintenance, ideation, 
 ## Contract
 
 - Every script finds its own siblings relative to itself and the vault through **`WIKI_VAULT`** (default `~/projects/knowledge-vault`): `wiki/`, `.vault-meta/` (index, address counter, locks), `eval/goldset*.json`, `maintenance/dream-ledger.jsonl`, `wiki/.lint/` and the `.git/wiki-*` markers all live in the vault.
-- Callers: the dotfiles hooks (`wiki-autocommit.sh` refreshes the index and writes the consolidation-due list, `wiki-hot-cache.sh` probes the embedder and shows `wiki-lint.py --brief`, the `UserPromptSubmit` recall hook, `wiki-stop-check.sh` runs `wiki-lint.py --brief --only` and `fm-validate.py` on the pages a session left uncommitted), the `save` and `wiki-apply` skills (symlinked into `~/.claude/skills/` by chezmoi), `vault-explorer`'s Recall lens, and Claude's read protocol in `~/.claude/CLAUDE.md`.
+- Callers: the dotfiles hooks (`wiki-autocommit.sh` refreshes the index and writes the consolidation-due list, `wiki-hot-cache.sh` probes the embedder and shows `wiki-lint.py --brief`, the `UserPromptSubmit` recall hook, `wiki-stop-check.sh` runs `wiki-lint.py --brief --only` and `fm-validate.py` on the pages a session changed, committed or not), the `save` and `wiki-apply` skills (symlinked into `~/.claude/skills/` by chezmoi), `vault-explorer`'s Recall lens, and Claude's read protocol in `~/.claude/CLAUDE.md`.
 
 ## Layout
 
