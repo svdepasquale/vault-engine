@@ -157,6 +157,25 @@ def test_brief_lists_write_errors_and_skips_age(lint_module, tmp_path, monkeypat
     assert not [line for line in lines if line.startswith("stale")]
 
 
+def test_brief_only_keeps_findings_about_the_given_pages(lint_module, tmp_path, monkeypatch):
+    # A Stop hook asks about the pages a session changed: the missing inverse
+    # lives on b but a declared the edge, so it concerns both; the dead link
+    # on c concerns neither.
+    write(tmp_path / "entities/a.md", graph_page("a", fm='relations:\n  hosted_on: "[[b]]"\n') + "[[b]] [[c]]\n")
+    write(tmp_path / "entities/b.md", graph_page("b", fm="relations:\n  hosts:\n") + "[[a]] [[c]]\n")
+    write(tmp_path / "entities/c.md", graph_page("c") + "[[a]] [[nowhere]]\n")
+    for only in ({"entities/a.md"}, {"entities/b.md"}):
+        buf = io.StringIO()
+        monkeypatch.setattr(sys, "stdout", buf)
+        lint_module.main(brief=True, only=only)
+        lines = buf.getvalue().splitlines()
+        assert len(lines) == 1 and lines[0].startswith("relation_missing_inverse: entities/b.md"), lines
+    buf = io.StringIO()
+    monkeypatch.setattr(sys, "stdout", buf)
+    lint_module.main(brief=True, only={"entities/c.md"})
+    assert buf.getvalue().splitlines() == ["dead_link: [[nowhere]] in entities/c.md"]
+
+
 def test_brief_is_empty_on_a_clean_vault(lint_module, tmp_path, monkeypatch):
     write(tmp_path / "entities/a.md", graph_page("a", fm='relations:\n  hosted_on: "[[b]]"\n') + "[[b]]\n")
     write(tmp_path / "entities/b.md", graph_page("b", fm='relations:\n  hosts: "[[a]]"\n') + "[[a]]\n")

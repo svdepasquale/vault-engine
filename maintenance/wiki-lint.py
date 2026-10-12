@@ -16,7 +16,9 @@ Findings:
 
 --brief prints one line per finding except the age/size ones (stale,
 hot_oversize, log_oversize), nothing when there are none: the form a
-session-start hook can show as is.
+session-start hook can show as is. `--brief --only PAGE...` keeps the findings
+that involve those pages (as path, referrer or declaring page; `wiki/` prefix
+optional): the form a hook uses for the pages a session just changed.
 """
 from __future__ import annotations
 import os
@@ -130,10 +132,16 @@ def brief_line(f: dict) -> str:
                       for k, v in f.items() if k not in ("type", "path"))
     return f"{t}: {f.get('path', '')}" + (f" ({extra})" if extra else "")
 
+def involves(f: dict) -> set[str]:
+    """The pages a finding is about: its own, a declaring page, the referrers."""
+    pages = {f.get("path"), f.get("declared_by")} | set(f.get("referrers", [])) | set(f.get("paths", []))
+    pages.discard(None)
+    return pages
+
 def slug(p: Path) -> str:
     return p.stem
 
-def main(brief: bool = False):
+def main(brief: bool = False, only: set[str] | None = None):
     pages = [p for p in VAULT.rglob("*.md") if ".lint" not in p.parts]
     by_slug: dict[str, list[Path]] = {}
     fm_cache: dict[Path, dict] = {}
@@ -270,7 +278,7 @@ def main(brief: bool = False):
 
     if brief:
         for f in findings:
-            if f["type"] not in BRIEF_SKIP:
+            if f["type"] not in BRIEF_SKIP and (only is None or involves(f) & only):
                 print(brief_line(f))
         return
 
@@ -308,4 +316,9 @@ def main(brief: bool = False):
     print()
 
 if __name__ == "__main__":
-    main(brief="--brief" in sys.argv[1:])
+    argv, only = sys.argv[1:], None
+    if "--only" in argv:
+        i = argv.index("--only")
+        only = {a.removeprefix("wiki/") for a in argv[i + 1:]}
+        argv = argv[:i]
+    main(brief="--brief" in argv, only=only)
