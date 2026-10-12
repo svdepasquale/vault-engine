@@ -5,9 +5,10 @@ Computes per-page embeddings via a local ollama instance and reports
 candidate duplicate page pairs. Read-only; never modifies wiki pages.
 
 Security model:
-- Defaults to http://127.0.0.1:11434. Remote ollama endpoints require
-  --allow-remote-ollama explicitly (vault bodies are POSTed as embedding
-  input; a hostile env var would otherwise exfiltrate content).
+- WIKI_EMBED_URL goes through scripts/endpoint-guard.py: this machine, the
+  LAN or the tailnet pass; a public address needs --allow-remote-backend
+  (vault bodies are POSTed as embedding input; a hostile env var would
+  otherwise exfiltrate content).
 - Rejects symlinked page files to prevent escape outside the vault root.
 
 Feature-gated: exits 10 if ollama is unreachable or 11 if the embedding
@@ -23,19 +24,19 @@ Usage:
   tiling-check.py --report PATH        # also write report to PATH
   tiling-check.py --rebuild-cache      # ignore cached embeddings
   tiling-check.py --peek               # structured diagnostics; no compute
-  tiling-check.py --allow-remote-ollama # accept non-localhost OLLAMA_URL
+  tiling-check.py --allow-remote-backend # accept a WIKI_EMBED_URL on a public address
 """
 
 import argparse
 import fcntl
 import hashlib
+import importlib.util
 import json
 import math
 import os
 import re
 import sys
 import urllib.error
-import urllib.parse
 import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
@@ -80,12 +81,10 @@ def log(msg: str) -> None:
     print(msg, file=sys.stderr)
 
 
-def _is_local_url(url: str) -> bool:
-    try:
-        host = urllib.parse.urlparse(url).hostname or ""
-    except ValueError:
-        return False
-    return host in ("127.0.0.1", "localhost", "::1")
+_guard_spec = importlib.util.spec_from_file_location(
+    "endpoint_guard", Path(__file__).resolve().parent / "endpoint-guard.py")
+_guard = importlib.util.module_from_spec(_guard_spec)
+_guard_spec.loader.exec_module(_guard)
 
 
 def _http_get_json(url: str, timeout: float) -> dict:
@@ -506,16 +505,17 @@ def main(argv: list[str]) -> int:
     p.add_argument("--peek", action="store_true")
     p.add_argument("--allow-remote-backend", "--allow-remote-ollama",
                    dest="allow_remote_backend", action="store_true",
-                   help="allow a WIKI_EMBED_URL pointing outside localhost "
+                   help="allow a WIKI_EMBED_URL on a public address; this machine, "
+                        "the LAN and the tailnet pass without it "
                         "(--allow-remote-ollama is a deprecated alias)")
     p.add_argument("--model", default=DEFAULT_MODEL)
     args = p.parse_args(argv)
 
     env_url = os.environ.get("WIKI_EMBED_URL")
     embed_url = env_url or DEFAULT_EMBED_URL
-    if env_url and not _is_local_url(embed_url) and not args.allow_remote_backend:
-        log(f"ERR: WIKI_EMBED_URL={embed_url!r} is not localhost. "
-            f"Vault content would be POSTed to a non-local host. "
+    why = _guard.check(embed_url, allow_public=args.allow_remote_backend) if env_url else None
+    if why:
+        log(f"ERR: WIKI_EMBED_URL={embed_url!r}: {why}. "
             f"Pass --allow-remote-backend to override.")
         return EXIT_USAGE
 

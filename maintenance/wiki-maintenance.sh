@@ -110,6 +110,9 @@ else
   API_URL="$LMS_URL"
 fi
 echo "backend=$BACKEND model=$MODEL"
+# Lint findings and page text go to that URL: same rule as every script that
+# POSTs vault text (this machine, the LAN or the tailnet; scripts/endpoint-guard.py).
+python3 "$ENGINE_ROOT/scripts/endpoint-guard.py" "$API_URL" || exit 1
 
 # llm_generate <prompt-file> <max-tokens> <out-file>
 # Backend-agnostic single-shot generation: writes the raw model text to

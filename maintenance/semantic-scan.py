@@ -18,7 +18,9 @@ stages, run by hand now and then:
    appears in its passage (whitespace- and Markdown-insensitive).
 
 Output: a proposals markdown file for Claude to verify and apply by hand; the
-model never edits a page. Nothing is written into wiki/.
+model never edits a page. Nothing is written into wiki/. The judge's URL passes
+scripts/endpoint-guard.py first: this machine, the LAN or the tailnet, never a
+public address unless WIKI_ALLOW_PUBLIC_ENDPOINTS=1.
 """
 import os
 import argparse
@@ -41,6 +43,9 @@ import importlib.util as _ilu
 _spec = _ilu.spec_from_file_location("rerank", ENGINE_SCRIPTS / "rerank.py")
 _rerank = _ilu.module_from_spec(_spec)
 _spec.loader.exec_module(_rerank)
+_spec = _ilu.spec_from_file_location("endpoint_guard", ENGINE_SCRIPTS / "endpoint-guard.py")
+_guard = _ilu.module_from_spec(_spec)
+_spec.loader.exec_module(_guard)
 # Same key rerank.py writes for the local backend — derived, not hardcoded, so
 # an EMBED_SCHEME or LOCAL_TAG bump cannot silently leave this scan with zero
 # vectors (and zero pairs).
@@ -233,6 +238,10 @@ def main():
         for s, pa, da, pb, db in pairs:
             print(f"{s:.3f}  {pa}  <>  {pb}")
         return 0
+    why = _guard.check(API)
+    if why:
+        print(f"refusing the judge URL: {why}", file=sys.stderr)
+        return 2
 
     results = []
     for k, (s, pa, da, pb, db) in enumerate(pairs, 1):

@@ -140,7 +140,8 @@ def main():
     parser.add_argument("--explain", action="store_true",
                         help="Include per-stage diagnostics in output")
     parser.add_argument("--allow-remote-ollama", action="store_true",
-                        help="Forwarded to rerank.py")
+                        help="Forwarded to rerank.py as --allow-remote-backend: accept a "
+                             "WIKI_EMBED_URL on a public address")
     parser.add_argument("--scores", action="store_true",
                         help="With --compact, also emit bm25 and the raw per-model "
                              "cosines (absolute relevance signal for recall.py)")

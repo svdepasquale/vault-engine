@@ -469,7 +469,7 @@ def main():
         print("--think relies on evo's server-side reasoning-budget cap; LM Studio has none "
               "and reasoned for 494 s without answering (2026-09-26)", file=sys.stderr)
         return 2
-    why = backend_check(url, model)
+    why = _scan._guard.check(url) or backend_check(url, model)
     if why:
         print(f"backend {args.backend}: {why}", file=sys.stderr)
         return 3

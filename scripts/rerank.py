@@ -19,9 +19,9 @@ Future v1.7.x upgrade paths:
   - Cohere Rerank API if COHERE_API_KEY set
   - Voyage Rerank API if VOYAGE_API_KEY set
 
-Mirrors the localhost-only WIKI_EMBED_URL guard from scripts/tiling-check.py:
-remote backends require --allow-remote-backend because page bodies
-are POSTed as embedding input.
+WIKI_EMBED_URL goes through scripts/endpoint-guard.py, like every script that
+POSTs vault text: this machine, the LAN or the tailnet pass, a public address
+needs --allow-remote-backend (page bodies are the embedding input).
 
 Usage:
   rerank.py "query string" --candidates candidates.json [--top 5]
@@ -43,6 +43,7 @@ Exit codes:
 
 import argparse
 import fcntl
+import importlib.util
 import json
 import math
 import os
@@ -53,7 +54,6 @@ import tempfile
 import time
 from concurrent.futures import ThreadPoolExecutor
 import urllib.error
-import urllib.parse
 import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
@@ -63,6 +63,11 @@ from pathlib import Path
 VAULT_ROOT = Path(os.environ.get("WIKI_VAULT") or Path.home() / "projects" / "knowledge-vault").resolve()
 META_DIR = VAULT_ROOT / ".vault-meta"
 EMBED_CACHE_PATH = META_DIR / "embed-cache.json"
+
+_guard_spec = importlib.util.spec_from_file_location(
+    "endpoint_guard", Path(__file__).resolve().parent / "endpoint-guard.py")
+_guard = importlib.util.module_from_spec(_guard_spec)
+_guard_spec.loader.exec_module(_guard)
 CACHE_LOCK = META_DIR / ".embed-cache.lock"
 
 DEFAULT_EMBED_URL = "http://127.0.0.1:1234"
@@ -277,16 +282,14 @@ def cosine(a, b):
 
 def embed_url(allow_remote):
     url = os.environ.get("WIKI_EMBED_URL", DEFAULT_EMBED_URL).rstrip("/")
-    if not allow_remote:
-        parsed = urllib.parse.urlparse(url)
-        host = parsed.hostname or ""
-        if host not in ("127.0.0.1", "localhost", "::1"):
-            log(f"ERR: WIKI_EMBED_URL={url} points off-localhost (host={host!r}).")
-            log("  Page bodies are POSTed as embedding inputs; keep them on this machine.")
-            log("  Either: (a) start the local server — `lms server start`")
-            log("  Or:     (b) pass --allow-remote-backend through retrieve.py, which forwards it here.")
-            log(f"  Or:     (c) unset WIKI_EMBED_URL to fall back to {DEFAULT_EMBED_URL}.")
-            sys.exit(EXIT_USAGE)
+    why = _guard.check(url, allow_public=allow_remote)
+    if why:
+        log(f"ERR: WIKI_EMBED_URL={url}: {why}.")
+        log("  Page bodies are POSTed as embedding inputs; keep them on machines you control.")
+        log("  Either: (a) point it at this machine, the LAN or the tailnet")
+        log("  Or:     (b) pass --allow-remote-backend through retrieve.py, which forwards it here.")
+        log(f"  Or:     (c) unset WIKI_EMBED_URL to fall back to {DEFAULT_EMBED_URL}.")
+        sys.exit(EXIT_USAGE)
     return url
 
 
@@ -616,8 +619,9 @@ def main():
                         help="Pre-embed every chunk missing a cached vector, then exit")
     parser.add_argument("--allow-remote-backend", "--allow-remote-ollama",
                         dest="allow_remote_backend", action="store_true",
-                        help="Accept a non-localhost WIKI_EMBED_URL (potential data exfil). "
-                             "--allow-remote-ollama is a deprecated alias.")
+                        help="Accept a WIKI_EMBED_URL on a public address (page bodies would "
+                             "leave your machines; this machine, the LAN and the tailnet "
+                             "pass without it). --allow-remote-ollama is a deprecated alias.")
     args = parser.parse_args()
 
     if args.embed_all:
