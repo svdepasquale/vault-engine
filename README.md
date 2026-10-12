@@ -3,7 +3,7 @@
 Retrieval, maintenance and evaluation tooling for a plain-markdown knowledge vault that serves as Claude Code's long-term memory.
 
 - **Retrieval** — paragraph chunks with a synthetic page prefix, a BM25 index, and a local embedding rerank (Homebrew `llama-embedding`, nothing resident) fused by z-scored scores; chunk-level output sized for an LLM's context.
-- **Maintenance** — deterministic lint (links, frontmatter, typed-relation predicates and inverses; a `--brief` form for a session-start hook) and autofix, local-LLM fix proposals behind a judge, a semantic scan for contradictions and duplicates across pages, a consolidation signal for pages that have grown into journals, and an ideation ("dream") pass.
+- **Maintenance** — deterministic lint (links, frontmatter, typed-relation predicates and inverses; a `--brief` form for a session-start hook, `--only` for the pages a session just changed), a frontmatter check that YAML reads each page the way the line-based readers do, and autofix, local-LLM fix proposals behind a judge, a semantic scan for contradictions and duplicates across pages, a consolidation signal for pages that have grown into journals, and an ideation ("dream") pass.
 - **Evaluation** — a gold-set harness (page recall, MRR, and knowledge-update scoring: does the *current* fact win over a stale one).
 
 The vault it works on is a separate repository, set with `WIKI_VAULT`. See `CLAUDE.md` for the layout and the contract.
@@ -19,7 +19,7 @@ python3 eval/run-eval.py --gold goldset.json                                    
 bash maintenance/run-tests.sh                                                         # tests (pytest via uv)
 ```
 
-Embeddings run locally through Homebrew `llama-embedding` on GGUF models; without it, retrieval degrades to BM25 order and says so in its output.
+Embeddings run locally through Homebrew `llama-embedding` on GGUF models; without it, retrieval degrades to BM25 order and says so in its output. Any script that sends vault text over HTTP (an embedding server, the local judge and dream models) accepts only hosts on this machine, the LAN or a tailnet; a public address needs `WIKI_ALLOW_PUBLIC_ENDPOINTS=1`.
 
 ## Credits
 

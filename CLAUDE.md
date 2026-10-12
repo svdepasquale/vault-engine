@@ -5,13 +5,13 @@ The code that runs Claude's long-term memory: retrieval, maintenance, ideation, 
 ## Contract
 
 - Every script finds its own siblings relative to itself and the vault through **`WIKI_VAULT`** (default `~/projects/knowledge-vault`): `wiki/`, `.vault-meta/` (index, address counter, locks), `eval/goldset*.json`, `maintenance/dream-ledger.jsonl`, `wiki/.lint/` and the `.git/wiki-*` markers all live in the vault.
-- Callers: the dotfiles hooks (`wiki-autocommit.sh` refreshes the index and writes the consolidation-due list, `wiki-hot-cache.sh` probes the embedder and shows `wiki-lint.py --brief`, the `UserPromptSubmit` recall hook), the `save` and `wiki-apply` skills (symlinked into `~/.claude/skills/` by chezmoi), `vault-explorer`'s Recall lens, and Claude's read protocol in `~/.claude/CLAUDE.md`.
+- Callers: the dotfiles hooks (`wiki-autocommit.sh` refreshes the index and writes the consolidation-due list, `wiki-hot-cache.sh` probes the embedder and shows `wiki-lint.py --brief`, the `UserPromptSubmit` recall hook, `wiki-stop-check.sh` runs `wiki-lint.py --brief --only` and `fm-validate.py` on the pages a session left uncommitted), the `save` and `wiki-apply` skills (symlinked into `~/.claude/skills/` by chezmoi), `vault-explorer`'s Recall lens, and Claude's read protocol in `~/.claude/CLAUDE.md`.
 
 ## Layout
 
 ```
-scripts/       retrieval: contextual-prefix (chunks), bm25-index, rerank (local llama-embedding), retrieve, recall hook; address/lock helpers
-maintenance/   wiki-maintenance.sh (lint → autofix → LLM proposals → judge → PENDING), semantic-scan, dream + dream-claude.workflow.js, consolidation-due; tests/; launchd/ (on demand)
+scripts/       retrieval: contextual-prefix (chunks), bm25-index, rerank (local llama-embedding), retrieve, recall hook; address/lock helpers; endpoint-guard
+maintenance/   wiki-maintenance.sh (lint → autofix → LLM proposals → judge → PENDING), fm-validate, semantic-scan, dream + dream-claude.workflow.js, consolidation-due; tests/; launchd/ (on demand)
 eval/          run-eval.py — the gold sets it reads are vault data
 skills/        save, wiki-apply (live), wiki-fold (retired record)
 ```
@@ -27,4 +27,5 @@ skills/        save, wiki-apply (live), wiki-fold (retired record)
 - Tests: `bash maintenance/run-tests.sh` (pytest via `uv`).
 - Any retrieval change is measured before and after with the gate in the vault's `CLAUDE.md` §Acceptance gate: `python3 eval/run-eval.py --gold <set>` for the four gold sets, local hybrid and BM25-only (`WIKI_EMBED_URL=http://127.0.0.1:9`). `run-eval.py` prints the gold hash, the vault HEAD and this repo's HEAD.
 - Changing the embedding input needs an `EMBED_SCHEME` bump in `scripts/rerank.py`.
+- Every script that sends vault text over HTTP checks its URL with `scripts/endpoint-guard.py` first: this machine, the LAN or the tailnet pass, a public address only with `WIKI_ALLOW_PUBLIC_ENDPOINTS=1` (or `--allow-remote-backend` on the embedders). A new caller does the same.
 - Nothing commits this repo automatically (the vault's SessionEnd hook commits only the vault's `wiki/` and `.vault-meta/`): commit your own work with its rationale, and push.
