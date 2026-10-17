@@ -101,3 +101,21 @@ def test_cross_encoder_reorders_only_the_fused_top(monkeypatch, tmp_path):
     out = mod.rerank("q", [{"path": p} for p in "abc"], top_k=None)
     # b overtakes a inside the shortlist; c, outside it, cannot climb whatever its score
     assert [c["path"] for c in out] == ["b", "a", "c"]
+
+
+def test_an_empty_pool_stays_empty(monkeypatch, tmp_path):
+    # retrieve.py fills a short BM25 pool but not an empty one (small talk in the hook)
+    mod, _ = load(monkeypatch, tmp_path, "off")
+    fake_backend(monkeypatch, mod, {"b": [1.0, 0.0]})
+    assert mod.rerank("q", [], top_k=None, dense_k=20,
+                      dense_pool={"x:0": {"path": "b", "body_hash": "b"}},
+                      make_candidate=lambda cid, path: {"chunk_id": cid, "path": path}) == []
+
+
+def test_a_requested_cross_encoder_that_cannot_run_says_so(monkeypatch, tmp_path, capsys):
+    mod, _ = load(monkeypatch, tmp_path, "fuse")
+    (tmp_path / "models" / "ce.gguf").unlink()
+    fake_backend(monkeypatch, mod, {"a": [1.0, 0.0], "b": [0.0, 1.0]})
+    out = mod.rerank("q", [{"path": "a"}, {"path": "b"}], top_k=None)
+    assert [c["path"] for c in out] == ["a", "b"]
+    assert "WIKI_CE=fuse but the cross-encoder cannot run (no reranker GGUF" in capsys.readouterr().err

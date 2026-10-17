@@ -19,9 +19,11 @@ off by default, and was measured twice. Over all 20 BM25 candidates it put the
 answer in the returned chunks more often, but every query got several seconds
 slower (uncacheable: one pass per query-chunk pair) and a page whose one short
 chunk answered the question directly fell out of the window. Over the fused top
-6 (WIKI_CE_TOP, the shape kept here) page recall held and answer evidence still
-rose, but each query paid ~1.8 s, past the bound set before measuring. Neither
-was adopted; the numbers are in the vault's acceptance-gate record.
+6 (WIKI_CE_TOP, the shape kept here) English page recall held and answer
+evidence rose, but Italian rank-1 and knowledge-update hits fell and each query
+paid 1.7-2.8 s more, past the bound set before measuring. Neither was adopted;
+the numbers are in the vault's acceptance-gate record. A replay of the full-set
+arm (de8aca4) also needs WIKI_DENSE_FILL=0, and compares ranks, not scores.
 
 WIKI_EMBED_URL goes through scripts/endpoint-guard.py, like every script that
 POSTs vault text: this machine, the LAN or the tailnet pass, a public address
@@ -202,11 +204,18 @@ CE_GGUF = os.environ.get(
 CE_SEP = "<#wiki-cls-sep#>"
 
 
+def ce_missing():
+    """Why the requested cross-encoder cannot run here, or None when it can."""
+    if not (os.path.isfile(LLAMA_EMBEDDING) and os.access(LLAMA_EMBEDDING, os.X_OK)):
+        return f"no llama-embedding at {LLAMA_EMBEDDING}"
+    if not (GGUF_DIR / CE_GGUF).is_file():
+        return f"no reranker GGUF at {GGUF_DIR / CE_GGUF}"
+    return None
+
+
 def ce_enabled():
     """True when WIKI_CE asks for the stage and the binary and GGUF are here."""
-    return (CE_MODE in ("only", "fuse")
-            and os.path.isfile(LLAMA_EMBEDDING) and os.access(LLAMA_EMBEDDING, os.X_OK)
-            and (GGUF_DIR / CE_GGUF).is_file())
+    return CE_MODE in ("only", "fuse") and ce_missing() is None
 
 
 def cross_encode(query, docs):
@@ -606,10 +615,14 @@ def rerank(query, candidates, top_k=5, allow_remote=False,
     if dense_pool and dense_k > 0 and make_candidate:
         picked = dense_pick({m: results[m][0] for m in active}, cache, tag, dense_pool,
                             {c.get("path") for c in candidates}, dense_k)
+        if not picked:
+            log("dense fill: no cached vectors to draw from — run rerank.py --embed-all "
+                "on this backend first")
         for cid, path in picked:
             c = make_candidate(cid, path)
             chunk = load_chunk(path) if c else None
-            if chunk:
+            # An index older than the chunk files would rank one text and score another.
+            if chunk and chunk.get("body_hash") == dense_pool[cid]["body_hash"]:
                 c["dense"] = True
                 candidates.append(c)
                 chunk_of[id(c)] = chunk
@@ -667,12 +680,16 @@ def rerank(query, candidates, top_k=5, allow_remote=False,
     # the same score slots, so it picks among the fusion's best and never pulls
     # a chunk up from below them. CE_TOP >= the candidate count replays the
     # full-set A/B of 2026-10-17 (vault-engine de8aca4, run beside the embedders).
-    if kind == "local" and ce_enabled():
+    if CE_MODE in ("only", "fuse") and not (kind == "local" and ce_enabled()):
+        log(f"WARN: WIKI_CE={CE_MODE} but the cross-encoder cannot run "
+            f"({ce_missing() or 'it needs the local backend'}) — cosine order kept")
+    elif CE_MODE in ("only", "fuse"):
         short = sorted((c for c in candidates if c.get("rerank_source") != "missing-chunk"),
                        key=lambda c: c["rerank_score"], reverse=True)[:CE_TOP]
         try:
             ce = cross_encode(query, [chunk_of[id(c)].get("contextualized_text")
-                                      or chunk_of[id(c)].get("raw_text", "") for c in short])
+                                      or chunk_of[id(c)].get("raw_text", "") for c in short]
+                              ) if short else None
         except Exception as e:
             log(f"cross-encoder failed: {e} — cosine order kept")
             ce = None

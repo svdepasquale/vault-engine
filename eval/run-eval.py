@@ -28,9 +28,10 @@ degrades to the surviving model and still reports numbers — check stderr, not
 just this summary.
 
 Provenance: every run prints the gold set's SHA-256 (first 12 hex), the vault
-HEAD (+dirty when tracked files differ from it), the BM25 index's SHA-256 (the
-index is untracked and rebuilt by any session's SessionEnd, so HEAD alone does
-not pin it) and the engine HEAD. Record them with any baseline row in CLAUDE.md
+HEAD (+dirty when tracked files differ from it), a content hash of the BM25
+index (each chunk's id, body_hash and length; the index is untracked and any
+session's SessionEnd rebuilds it, which HEAD does not show — checked again at the
+end of the run) and the engine HEAD. Record them with any baseline row in CLAUDE.md
 §Acceptance gate: rows measured on different gold or index hashes are not
 comparable line-for-line (the 2026-07-29 baseline below is the example).
 
@@ -51,8 +52,8 @@ CLAUDE.md §Consolidate).
 
 Answer markers on the standard sets (2026-10-17, after the exposed-evidence
 metric of a sibling project, obsidian-second-brain): items that ask for a fact
-carry "current" markers too — the answer as the page states it, not a word of
-the question. Page recall cannot see the right page coming back with the wrong
+carry "current" markers too — the answer as the page states it; a marker may
+share words with the question but is never made of question words alone. Page recall cannot see the right page coming back with the wrong
 chunk, which costs the caller a full-page read; these can. With no "stale"
 marker anywhere in the set, the same labels print as A@1 (the top chunk states
 the answer) and A@k (a chunk in the window does). Topic items — a design doc,
@@ -152,11 +153,25 @@ HEAD = (_git("rev-parse", "--short", "HEAD") or "unknown") + (
     "+dirty" if _git("status", "--porcelain", "--untracked-files=no") else "")
 ENGINE_HEAD = (_git("rev-parse", "--short", "HEAD", cwd=ENGINE) or "unknown") + (
     "+dirty" if _git("status", "--porcelain", "--untracked-files=no", cwd=ENGINE) else "")
-# The index is untracked and any session's SessionEnd rebuilds it, so the vault
-# HEAD does not pin what retrieval read: on 2026-10-17 it was rebuilt twice in
-# the middle of an A/B with HEAD telling nothing. Its hash does.
+# The index is untracked and any session's SessionEnd rebuilds it: a HEAD change
+# does not say whether or when it was rebuilt, and a rebuild from uncommitted
+# edits leaves HEAD as it was. Its content hash does say: each chunk's id,
+# body_hash and indexed length (not the file bytes, which carry the build time).
 _bm25 = VAULT / ".vault-meta" / "bm25" / "index.json"
-INDEX_SHA = hashlib.sha256(_bm25.read_bytes()).hexdigest()[:12] if _bm25.is_file() else "none"
+
+
+def _index_sha():
+    if not _bm25.is_file():
+        return "none"
+    try:
+        docs = json.loads(_bm25.read_text(encoding="utf-8")).get("docs", {})
+    except (json.JSONDecodeError, OSError):
+        return "unreadable"
+    key = sorted((cid, d.get("body_hash") or d.get("path"), d.get("dl")) for cid, d in docs.items())
+    return hashlib.sha256(json.dumps(key).encode("utf-8")).hexdigest()[:12]
+
+
+INDEX_SHA = _index_sha()
 r1 = r3 = rk = 0
 mrr = 0.0
 chars = 0
@@ -200,6 +215,9 @@ for item in gold:
         misses.append((item["q"], item["gold"], pages))
 
 n = len(gold)
+if _index_sha() != INDEX_SHA:
+    print(f"WARN: the index was rebuilt during this run ({INDEX_SHA} → {_index_sha()}): "
+          "the queries did not all see the same corpus.\n")
 if degraded:
     print("WARN: rerank fell back to no-op (no embedding backend) "
           "— these numbers are BM25-only and not comparable to the baseline.\n")
@@ -231,13 +249,13 @@ if misses:
     print("\n  MISSES:")
     for q, g, got in misses:
         print(f"    {q}\n      want {g}\n      got  {got[:3]}")
+prev = json.loads(COMPARE.read_text(encoding="utf-8")) if COMPARE else None  # before --save may overwrite it
 if SAVE:
     SAVE.write_text(json.dumps({"gold": GOLD.name, "gold_sha": GOLD_SHA, "vault": HEAD,
                                 "index": INDEX_SHA, "engine": ENGINE_HEAD, "top": TOP,
                                 "rows": rows}, ensure_ascii=False, indent=1) + "\n",
                     encoding="utf-8")
-if COMPARE:
-    prev = json.loads(COMPARE.read_text(encoding="utf-8"))
+if prev is not None:
     if (prev.get("gold_sha"), prev.get("top")) != (GOLD_SHA, TOP):
         print(f"\nWARN: {COMPARE.name} was gold {prev.get('gold_sha')} top {prev.get('top')}, "
               f"this run gold {GOLD_SHA} top {TOP}; queries are matched by text")
@@ -253,3 +271,8 @@ if COMPARE:
         labs = f"   labels {b['labels']} → {r['labels']}" if b["labels"] or r["labels"] else ""
         print(f"    rank {b['rank'] or '-'} → {r['rank'] or '-'}{labs}   {r['q']}\n"
               f"      scores {b['scores']} → {r['scores']}")
+    now = {r["q"] for r in rows}
+    for q in sorted(set(before) - now):
+        print(f"    missing from this run (FAIL above?): {q}")
+    for q in sorted(now - set(before)):
+        print(f"    not in {COMPARE.name}: {q}")

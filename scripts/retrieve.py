@@ -212,7 +212,9 @@ def main():
         # pool cannot be reranked up. Fill the pool to --bm25-top with the chunks
         # nearest by cached vector, but only then: added to every query, they
         # outrank the lexical hits in a cosine-only fusion (2026-10-17 A/B).
-        fill = max(0, args.bm25_top - len(bm25_hits)) if args.dense_fill else 0
+        # A pool with no BM25 hit at all stays empty: in the hook's calibration
+        # set every such prompt was small talk, where silence is the right answer.
+        fill = max(0, args.bm25_top - len(candidates)) if args.dense_fill else 0
         final = reranker.rerank(
             args.query, candidates, top_k=None,  # the fill may add candidates; all go on
             allow_remote=args.allow_remote_ollama,

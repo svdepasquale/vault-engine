@@ -143,6 +143,10 @@ def decide(prompt, threshold=THRESHOLD):
     if is_trivial(prompt):
         return {"action": "skip", "reason": "trivial", "pointers": []}
     result = retrieve(query_for(prompt))
+    if not result.get("candidates"):
+        # No BM25 hit at all (retrieve.py fills only a short pool, not an
+        # empty one): nothing to point at, and the embedder is not the cause.
+        return {"action": "none", "reason": "no-hits", "pointers": []}
     if "cosine:" not in result.get("strategy", ""):
         # BM25-only has no absolute relevance signal: stay silent.
         return {"action": "skip", "reason": "no-embedder", "pointers": []}
