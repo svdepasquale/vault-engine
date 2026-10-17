@@ -14,10 +14,11 @@ v1.7 strategy (in preference order, automatically chosen at runtime):
          note. Caller (retrieve.py) still gets a useful result; downstream
          drill-into-page logic is unchanged.
 
-Future v1.7.x upgrade paths:
-  - Cross-encoder reranker (sentence-transformers BGE-base) if installed
-  - Cohere Rerank API if COHERE_API_KEY set
-  - Voyage Rerank API if VOYAGE_API_KEY set
+Cross-encoder (2026-10-17): a bge-reranker-v2-m3 stage exists behind WIKI_CE,
+off by default. Its A/B put the answer in the returned chunks more often, but it
+made every query several seconds slower (uncacheable: one pass per query-chunk
+pair) and dropped a page whose one short chunk answered the question directly,
+so it was not adopted; the numbers are in the vault's acceptance-gate record.
 
 WIKI_EMBED_URL goes through scripts/endpoint-guard.py, like every script that
 POSTs vault text: this machine, the LAN or the tailnet pass, a public address
@@ -180,6 +181,55 @@ LOCAL_MAX_CHARS = 8000
 # local backend files its vectors under a tagged model name. The key keeps the
 # `<model>:<EMBED_SCHEME>:<body_hash>` shape bm25-index.py's GC parses.
 LOCAL_TAG = "llamacpp2/"  # v2 (2026-09-26): --no-escape, so text is embedded verbatim like over HTTP
+
+# --- Cross-encoder stage (2026-10-17, A/B behind WIKI_CE) -------------------
+# The embedders score the query and each chunk apart; a cross-encoder reads
+# the pair together. bge-reranker-v2-m3 is multilingual, so an Italian query
+# is scored against the English pages directly. Same Homebrew binary with
+# --pooling rank, one process per query, nothing resident; unlike the chunk
+# vectors its scores cannot be cached (one pass per query-chunk pair).
+# WIKI_CE: off (default) | only (order by the cross-encoder alone) | fuse
+# (mean of the z-scored fused cosine and the z-scored cross-encoder score).
+CE_MODE = os.environ.get("WIKI_CE", "off")
+CE_GGUF = os.environ.get(
+    "WIKI_CE_GGUF", "gpustack/bge-reranker-v2-m3-GGUF/bge-reranker-v2-m3-Q8_0.gguf")
+CE_SEP = "<#wiki-cls-sep#>"
+
+
+def ce_enabled():
+    """True when WIKI_CE asks for the stage and the binary and GGUF are here."""
+    return (CE_MODE in ("only", "fuse")
+            and os.path.isfile(LLAMA_EMBEDDING) and os.access(LLAMA_EMBEDDING, os.X_OK)
+            and (GGUF_DIR / CE_GGUF).is_file())
+
+
+def cross_encode(query, docs):
+    """One relevance score per doc (raw logit) from one llama-embedding run."""
+    def clean(t):
+        return (t or " ").replace(LOCAL_SEP, " ").replace(CE_SEP, " ")[:LOCAL_MAX_CHARS] or " "
+    fd, path = tempfile.mkstemp(suffix=".txt")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8", errors="replace") as fh:
+            fh.write(LOCAL_SEP.join(clean(query) + CE_SEP + clean(d) for d in docs))
+        proc = subprocess.run(
+            [LLAMA_EMBEDDING, "-m", str(GGUF_DIR / CE_GGUF), "-f", path,
+             "--no-escape", "--pooling", "rank", "--embd-normalize", "-1",
+             "--cls-separator", CE_SEP, "--embd-separator", LOCAL_SEP,
+             "--embd-output-format", "array", "-ngl", "99",
+             "-c", str(LOCAL_CTX), "-b", str(LOCAL_CTX), "-ub", str(LOCAL_CTX)],
+            capture_output=True, timeout=LOCAL_TIMEOUT_SEC)
+    finally:
+        try:
+            os.unlink(path)
+        except OSError:
+            pass
+    if proc.returncode != 0:
+        tail = proc.stderr.decode("utf-8", "replace").strip().splitlines()[-3:]
+        raise RuntimeError(f"llama-embedding (rank) exit {proc.returncode}: {' | '.join(tail)}")
+    scores = [s[0] if isinstance(s, list) else s for s in json.loads(proc.stdout)]
+    if len(scores) != len(docs):
+        raise RuntimeError(f"cross-encoder returned {len(scores)} scores for {len(docs)} pairs")
+    return scores
 
 
 def local_models():
@@ -484,8 +534,14 @@ def rerank(query, candidates, top_k=5, allow_remote=False):
             raise RuntimeError("query embedding failed")
         return vecs
 
+    # The cross-encoder needs no cosine, so it runs beside the embedders.
+    ce_on = kind == "local" and ce_enabled()
+    ce_ids = list(chunk_of)
     try:
-        with ThreadPoolExecutor(max_workers=len(active)) as pool:
+        with ThreadPoolExecutor(max_workers=len(active) + ce_on) as pool:
+            ce_future = pool.submit(cross_encode, query, [
+                chunk_of[i].get("contextualized_text") or chunk_of[i].get("raw_text", "")
+                for i in ce_ids]) if ce_on else None
             results = dict(zip(active, pool.map(run_job, active)))
     except Exception as e:
         log(f"embedding failed ({kind}): {e}")
@@ -548,6 +604,26 @@ def rerank(query, candidates, top_k=5, allow_remote=False):
         # the raw similarity.
         c["cosine"] = {m: round(per_model[m][id(c)], 4)
                        for m in active if id(c) in per_model[m]}
+
+    if ce_future is not None:
+        try:
+            ce = dict(zip(ce_ids, ce_future.result()))
+        except Exception as e:
+            log(f"cross-encoder failed: {e} — cosine order kept")
+            ce = {}
+        scored = [c for c in candidates
+                  if id(c) in ce and c.get("rerank_source") != "missing-chunk"]
+        if scored:
+            def zscores(vals):
+                mean = sum(vals) / len(vals)
+                sd = math.sqrt(sum((v - mean) ** 2 for v in vals) / len(vals)) or 1.0
+                return [(v - mean) / sd for v in vals]
+            ce_z = zscores([ce[id(c)] for c in scored])
+            fused_z = zscores([c["rerank_score"] for c in scored])
+            for c, cz, fz in zip(scored, ce_z, fused_z):
+                c["ce"] = round(ce[id(c)], 4)
+                c["rerank_score"] = cz if CE_MODE == "only" else (fz + cz) / 2
+                c["rerank_source"] += "+ce"
 
     if cache_dirty:
         save_cache(cache)
