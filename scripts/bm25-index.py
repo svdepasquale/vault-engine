@@ -20,9 +20,13 @@ Index schema (.vault-meta/bm25/index.json):
     "<term>": {"df": 17, "postings": [["c-000001:0", 3], ["c-000042:2", 1], ...]}
   },
   "docs": {
-    "<chunk_id>": {"path": ".vault-meta/chunks/c-000001/chunk-000.json", "dl": 487}
+    "<chunk_id>": {"path": ".vault-meta/chunks/c-000001/chunk-000.json", "dl": 487,
+                   "body_hash": "sha256:..."}
   }
 }
+
+`body_hash` (since 2026-10-17) lets retrieve.py look up every chunk's cached
+vectors without reading the chunk files, for its dense candidates.
 
 Chunk id format: "<page-address>:<chunk-index>" (e.g. "c-000042:3").
 
@@ -132,7 +136,7 @@ def release_lock(fd):
 
 
 def discover_chunks():
-    """Yield (chunk_id, path, contextualized_text) for every chunk on disk.
+    """Yield (chunk_id, path, contextualized_text, body_hash) for every chunk on disk.
 
     The yielded `path` is relative to the directory two levels above CHUNKS_DIR
     (i.e. .vault-meta/chunks/<addr>/ → relative to the vault root). This works
@@ -156,7 +160,7 @@ def discover_chunks():
             continue
         chunk_id = f"{address}:{idx}"
         rel_path = str(chunk_file.relative_to(rel_root))
-        yield chunk_id, rel_path, text
+        yield chunk_id, rel_path, text, data.get("body_hash")
 
 
 def build_index():
@@ -164,10 +168,10 @@ def build_index():
     df = Counter()
     postings = defaultdict(list)
 
-    for chunk_id, rel_path, text in discover_chunks():
+    for chunk_id, rel_path, text, body_hash in discover_chunks():
         tokens = tokenize(text)
         tf = Counter(tokens)
-        docs[chunk_id] = {"path": rel_path, "dl": len(tokens)}
+        docs[chunk_id] = {"path": rel_path, "dl": len(tokens), "body_hash": body_hash}
         for term, count in tf.items():
             df[term] += 1
             postings[term].append([chunk_id, count])
@@ -287,8 +291,8 @@ def load_index():
         sys.exit(EXIT_INDEX_MISSING)
 
 
-def query(text, top_k=20):
-    idx = load_index()
+def query(text, top_k=20, idx=None):
+    idx = idx or load_index()
     vocab = idx["vocab"]
     docs = idx["docs"]
     params = idx["params"]

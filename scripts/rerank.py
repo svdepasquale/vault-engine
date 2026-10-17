@@ -15,10 +15,13 @@ v1.7 strategy (in preference order, automatically chosen at runtime):
          drill-into-page logic is unchanged.
 
 Cross-encoder (2026-10-17): a bge-reranker-v2-m3 stage exists behind WIKI_CE,
-off by default. Its A/B put the answer in the returned chunks more often, but it
-made every query several seconds slower (uncacheable: one pass per query-chunk
-pair) and dropped a page whose one short chunk answered the question directly,
-so it was not adopted; the numbers are in the vault's acceptance-gate record.
+off by default, and was measured twice. Over all 20 BM25 candidates it put the
+answer in the returned chunks more often, but every query got several seconds
+slower (uncacheable: one pass per query-chunk pair) and a page whose one short
+chunk answered the question directly fell out of the window. Over the fused top
+6 (WIKI_CE_TOP, the shape kept here) page recall held and answer evidence still
+rose, but each query paid ~1.8 s, past the bound set before measuring. Neither
+was adopted; the numbers are in the vault's acceptance-gate record.
 
 WIKI_EMBED_URL goes through scripts/endpoint-guard.py, like every script that
 POSTs vault text: this machine, the LAN or the tailnet pass, a public address
@@ -47,6 +50,7 @@ import fcntl
 import importlib.util
 import json
 import math
+import operator
 import os
 import shutil
 import subprocess
@@ -189,8 +193,10 @@ LOCAL_TAG = "llamacpp2/"  # v2 (2026-09-26): --no-escape, so text is embedded ve
 # --pooling rank, one process per query, nothing resident; unlike the chunk
 # vectors its scores cannot be cached (one pass per query-chunk pair).
 # WIKI_CE: off (default) | only (order by the cross-encoder alone) | fuse
-# (mean of the z-scored fused cosine and the z-scored cross-encoder score).
+# (mean of the z-scored fused cosine and the z-scored cross-encoder score),
+# over the fused top WIKI_CE_TOP candidates (default 6).
 CE_MODE = os.environ.get("WIKI_CE", "off")
+CE_TOP = int(os.environ.get("WIKI_CE_TOP", "6"))
 CE_GGUF = os.environ.get(
     "WIKI_CE_GGUF", "gpustack/bge-reranker-v2-m3-GGUF/bge-reranker-v2-m3-Q8_0.gguf")
 CE_SEP = "<#wiki-cls-sep#>"
@@ -466,9 +472,55 @@ def load_chunk(chunk_rel_path):
         return None
 
 
-def rerank(query, candidates, top_k=5, allow_remote=False):
+def _zscores(vals):
+    mean = sum(vals) / len(vals)
+    sd = math.sqrt(sum((v - mean) ** 2 for v in vals) / len(vals)) or 1.0
+    return [(v - mean) / sd for v in vals]
+
+
+def _cos(q, qn, v):
+    """Cosine with the query's norm computed once; ~600 chunks per model per query."""
+    vn = math.sqrt(sum(map(operator.mul, v, v)))
+    return sum(map(operator.mul, q, v)) / (qn * vn) if qn and vn else 0.0
+
+
+def dense_pick(q_vecs, cache, tag, pool, have, k):
+    """Up to k chunks of `pool` nearest the query by cached vector whose path is
+    not in `have`, taking the models' nearest lists in turn: [(chunk_id, path)]."""
+    lists = []
+    for model, q in q_vecs.items():
+        qn = math.sqrt(sum(map(operator.mul, q, q)))
+        near = []
+        for cid, d in pool.items():
+            if d["path"] in have:
+                continue
+            vec = cache.get(f"{tag}{model}:{EMBED_SCHEME}:{d['body_hash']}")
+            if vec:
+                near.append((_cos(q, qn, vec), cid, d["path"]))
+        near.sort(reverse=True)
+        lists.append(near)
+    have, picked = set(have), []
+    for rank in range(max(map(len, lists), default=0)):
+        for near in lists:
+            if len(picked) >= k:
+                return picked
+            if rank < len(near) and near[rank][2] not in have:
+                have.add(near[rank][2])
+                picked.append(near[rank][1:])
+    return picked
+
+
+def rerank(query, candidates, top_k=5, allow_remote=False,
+           dense_pool=None, dense_k=0, make_candidate=None):
     """Returns candidates list, possibly truncated to top_k, with rerank_score added.
     Falls back to input-order if the backend is unavailable (still adds rerank_source: 'noop').
+
+    dense_pool ({chunk_id: {"path", "body_hash"}}), dense_k and make_candidate
+    (chunk_id, path -> candidate or None) add the dense_k chunks nearest the
+    query by cached vector that the caller's candidates miss: BM25 cannot put a
+    page in front of the rerank when the query shares no word with it (an
+    Italian question about an English page). Only already-cached vectors take
+    part, so this costs dot products, not embedding runs.
     """
     if not candidates:
         return []
@@ -534,14 +586,8 @@ def rerank(query, candidates, top_k=5, allow_remote=False):
             raise RuntimeError("query embedding failed")
         return vecs
 
-    # The cross-encoder needs no cosine, so it runs beside the embedders.
-    ce_on = kind == "local" and ce_enabled()
-    ce_ids = list(chunk_of)
     try:
-        with ThreadPoolExecutor(max_workers=len(active) + ce_on) as pool:
-            ce_future = pool.submit(cross_encode, query, [
-                chunk_of[i].get("contextualized_text") or chunk_of[i].get("raw_text", "")
-                for i in ce_ids]) if ce_on else None
+        with ThreadPoolExecutor(max_workers=len(active)) as pool:
             results = dict(zip(active, pool.map(run_job, active)))
     except Exception as e:
         log(f"embedding failed ({kind}): {e}")
@@ -550,15 +596,27 @@ def rerank(query, candidates, top_k=5, allow_remote=False):
             c["rerank_source"] = "noop-embed-error"
         return candidates[:top_k]
 
-    per_model = {}
     for model in active:
-        vecs = results[model]
         _, keys = jobs[model]
-        q_emb = vecs[0]
-        for key, vec in zip(keys[1:], vecs[1:]):
+        for key, vec in zip(keys[1:], results[model][1:]):
             if vec:
                 cache[key] = vec
                 cache_dirty = True
+
+    if dense_pool and dense_k > 0 and make_candidate:
+        picked = dense_pick({m: results[m][0] for m in active}, cache, tag, dense_pool,
+                            {c.get("path") for c in candidates}, dense_k)
+        for cid, path in picked:
+            c = make_candidate(cid, path)
+            chunk = load_chunk(path) if c else None
+            if chunk:
+                c["dense"] = True
+                candidates.append(c)
+                chunk_of[id(c)] = chunk
+
+    per_model = {}
+    for model in active:
+        q_emb = results[model][0]
         scores = {}
         for cid, chunk in chunk_of.items():
             emb = cache.get(f"{tag}{model}:{EMBED_SCHEME}:{chunk.get('body_hash', '')}")
@@ -605,25 +663,28 @@ def rerank(query, candidates, top_k=5, allow_remote=False):
         c["cosine"] = {m: round(per_model[m][id(c)], 4)
                        for m in active if id(c) in per_model[m]}
 
-    if ce_future is not None:
+    # The cross-encoder reorders only the fused top CE_TOP and gives them back
+    # the same score slots, so it picks among the fusion's best and never pulls
+    # a chunk up from below them. CE_TOP >= the candidate count replays the
+    # full-set A/B of 2026-10-17 (vault-engine de8aca4, run beside the embedders).
+    if kind == "local" and ce_enabled():
+        short = sorted((c for c in candidates if c.get("rerank_source") != "missing-chunk"),
+                       key=lambda c: c["rerank_score"], reverse=True)[:CE_TOP]
         try:
-            ce = dict(zip(ce_ids, ce_future.result()))
+            ce = cross_encode(query, [chunk_of[id(c)].get("contextualized_text")
+                                      or chunk_of[id(c)].get("raw_text", "") for c in short])
         except Exception as e:
             log(f"cross-encoder failed: {e} — cosine order kept")
-            ce = {}
-        scored = [c for c in candidates
-                  if id(c) in ce and c.get("rerank_source") != "missing-chunk"]
-        if scored:
-            def zscores(vals):
-                mean = sum(vals) / len(vals)
-                sd = math.sqrt(sum((v - mean) ** 2 for v in vals) / len(vals)) or 1.0
-                return [(v - mean) / sd for v in vals]
-            ce_z = zscores([ce[id(c)] for c in scored])
-            fused_z = zscores([c["rerank_score"] for c in scored])
-            for c, cz, fz in zip(scored, ce_z, fused_z):
-                c["ce"] = round(ce[id(c)], 4)
-                c["rerank_score"] = cz if CE_MODE == "only" else (fz + cz) / 2
-                c["rerank_source"] += "+ce"
+            ce = None
+        if ce:
+            slots = sorted((c["rerank_score"] for c in short), reverse=True)
+            ce_z, fused_z = _zscores(ce), _zscores([c["rerank_score"] for c in short])
+            mixed = [cz if CE_MODE == "only" else (fz + cz) / 2 for cz, fz in zip(ce_z, fused_z)]
+            order = sorted(range(len(short)), key=lambda i: mixed[i], reverse=True)
+            for slot, i in zip(slots, order):
+                short[i]["ce"] = round(ce[i], 4)
+                short[i]["rerank_score"] = slot
+                short[i]["rerank_source"] += "+ce"
 
     if cache_dirty:
         save_cache(cache)

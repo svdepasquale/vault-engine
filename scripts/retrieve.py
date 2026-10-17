@@ -4,7 +4,11 @@
 Pipeline (v1.7):
   query  →  bm25-index.py query (top-K candidates by BM25 over contextualized chunks)
          →  rerank.py        (cosine on nomic-embed-text vectors via ollama,
-                              or no-op if ollama unavailable)
+                              or no-op if ollama unavailable; since 2026-10-17
+                              a short BM25 pool is filled with the chunks
+                              nearest the query by cached vector, so a page
+                              BM25 cannot see — an Italian query over English
+                              pages — still competes)
          →  drill            (return chunk pages with absolute paths so the
                               caller can Read them and synthesize)
 
@@ -114,6 +118,25 @@ def chunk_snippet(chunk_data, max_chars=200):
     return text[:max_chars].rstrip() + "…"
 
 
+def build_candidate(chunk_id, path, bm25_score):
+    """The candidate record for one chunk file, or None when it cannot be read."""
+    try:
+        chunk = json.loads((VAULT_ROOT / path).read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return None
+    return {
+        "chunk_id": chunk_id,
+        "page_address": chunk.get("page_address"),
+        "page_path": chunk.get("page_path"),
+        "absolute_path": str((VAULT_ROOT / chunk.get("page_path", "")).resolve()),
+        "chunk_index": chunk.get("chunk_index"),
+        "bm25_score": bm25_score,
+        "path": path,
+        "snippet": chunk_snippet(chunk),
+        "_text": chunk.get("raw_text", ""),
+    }
+
+
 def main():
     parser = argparse.ArgumentParser(description="Hybrid retrieval over the vault.")
     parser.add_argument("query", help="Natural-language query; '-' reads it from stdin "
@@ -121,6 +144,11 @@ def main():
     parser.add_argument("--top", type=int, default=5, help="Final result count (post-rerank)")
     parser.add_argument("--bm25-top", type=int, default=20,
                         help="Candidate count from BM25 (pre-rerank)")
+    parser.add_argument("--no-dense-fill", dest="dense_fill", action="store_false",
+                        default=os.environ.get("WIKI_DENSE_FILL", "1") != "0",
+                        help="Do not fill a short BM25 pool (fewer than --bm25-top hits) "
+                             "with the chunks nearest the query by cached vector "
+                             "(also WIKI_DENSE_FILL=0)")
     parser.add_argument("--no-rerank", action="store_true",
                         help="Skip the rerank stage; return BM25-only")
     parser.add_argument("--chunks", action="store_true",
@@ -161,27 +189,12 @@ def main():
     bm25 = import_sibling("bm25_index", "bm25-index.py")
     reranker = import_sibling("rerank", "rerank.py")
 
-    bm25_hits = bm25.query(args.query, top_k=args.bm25_top)
+    index = bm25.load_index()
+    bm25_hits = bm25.query(args.query, top_k=args.bm25_top, idx=index)
     log(f"bm25: {len(bm25_hits)} hits")
 
-    candidates = []
-    for h in bm25_hits:
-        chunk_path = VAULT_ROOT / h["path"]
-        try:
-            chunk = json.loads(chunk_path.read_text(encoding="utf-8"))
-        except (json.JSONDecodeError, OSError):
-            continue
-        candidates.append({
-            "chunk_id": h["chunk_id"],
-            "page_address": chunk.get("page_address"),
-            "page_path": chunk.get("page_path"),
-            "absolute_path": str((VAULT_ROOT / chunk.get("page_path", "")).resolve()),
-            "chunk_index": chunk.get("chunk_index"),
-            "bm25_score": h["score"],
-            "path": h["path"],
-            "snippet": chunk_snippet(chunk),
-            "_text": chunk.get("raw_text", ""),
-        })
+    candidates = [c for c in (build_candidate(h["chunk_id"], h["path"], h["score"])
+                              for h in bm25_hits) if c]
 
     if args.no_rerank:
         final = candidates[:args.top]
@@ -194,9 +207,18 @@ def main():
         # per-page-cap stages below need material to promote from. Truncating
         # here would make the cap shrink the result set instead of replacing a
         # capped chunk with the next-best page. Final truncation is at the end.
+        # A query that shares almost no word with the vault (an Italian question
+        # about an English page) gets a short BM25 pool, and a page outside the
+        # pool cannot be reranked up. Fill the pool to --bm25-top with the chunks
+        # nearest by cached vector, but only then: added to every query, they
+        # outrank the lexical hits in a cosine-only fusion (2026-10-17 A/B).
+        fill = max(0, args.bm25_top - len(bm25_hits)) if args.dense_fill else 0
         final = reranker.rerank(
-            args.query, candidates, top_k=len(candidates),
+            args.query, candidates, top_k=None,  # the fill may add candidates; all go on
             allow_remote=args.allow_remote_ollama,
+            dense_pool={cid: d for cid, d in index["docs"].items() if d.get("body_hash")},
+            dense_k=fill,
+            make_candidate=lambda cid, path: build_candidate(cid, path, 0.0),
         )
         # Derive strategy from first candidate's rerank_source
         first_src = (final[0].get("rerank_source") if final else "unknown")
@@ -270,6 +292,7 @@ def main():
     if args.explain:
         out["explain"] = {
             "bm25_candidate_count": len(bm25_hits),
+            "dense_added_count": sum(1 for c in final if c.get("dense")),
             "post_rerank_count": len(final),
             "deduped_count": len(deduped),
             "bm25_top_param": args.bm25_top,
