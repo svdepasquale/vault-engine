@@ -218,7 +218,7 @@ def main():
         final = reranker.rerank(
             args.query, candidates, top_k=None,  # the fill may add candidates; all go on
             allow_remote=args.allow_remote_ollama,
-            dense_pool={cid: d for cid, d in index["docs"].items() if d.get("body_hash")},
+            dense_pool={cid: d for cid, d in index["docs"].items() if d.get("input_hash")},
             dense_k=fill,
             make_candidate=lambda cid, path: build_candidate(cid, path, 0.0),
         )

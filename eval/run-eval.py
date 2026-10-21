@@ -29,7 +29,7 @@ just this summary.
 
 Provenance: every run prints the gold set's SHA-256 (first 12 hex), the vault
 HEAD (+dirty when tracked files differ from it), a content hash of the BM25
-index (each chunk's id, body_hash and length; the index is untracked and any
+index (each chunk's id, input_hash and length; the index is untracked and any
 session's SessionEnd rebuilds it, which HEAD does not show — checked again at the
 end of the run) and the engine HEAD. Record them with any baseline row in CLAUDE.md
 §Acceptance gate: rows measured on different gold or index hashes are not
@@ -156,7 +156,8 @@ ENGINE_HEAD = (_git("rev-parse", "--short", "HEAD", cwd=ENGINE) or "unknown") + 
 # The index is untracked and any session's SessionEnd rebuilds it: a HEAD change
 # does not say whether or when it was rebuilt, and a rebuild from uncommitted
 # edits leaves HEAD as it was. Its content hash does say: each chunk's id,
-# body_hash and indexed length (not the file bytes, which carry the build time).
+# input_hash (the indexed text, prefix included) and indexed length (not the
+# file bytes, which carry the build time).
 _bm25 = VAULT / ".vault-meta" / "bm25" / "index.json"
 
 
@@ -167,7 +168,7 @@ def _index_sha():
         docs = json.loads(_bm25.read_text(encoding="utf-8")).get("docs", {})
     except (json.JSONDecodeError, OSError):
         return "unreadable"
-    key = sorted((cid, d.get("body_hash") or d.get("path"), d.get("dl")) for cid, d in docs.items())
+    key = sorted((cid, d.get("input_hash") or d.get("path"), d.get("dl")) for cid, d in docs.items())
     return hashlib.sha256(json.dumps(key).encode("utf-8")).hexdigest()[:12]
 
 

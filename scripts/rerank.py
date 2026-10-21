@@ -8,7 +8,8 @@ v1.7 strategy (in preference order, automatically chosen at runtime):
   1. If the embedding backend is reachable AND the models are loadable
        → embed the query, embed each candidate's contextualized_text,
          rank by cosine. Caches per-chunk embeddings in
-         .vault-meta/embed-cache.json keyed by body_hash.
+         .vault-meta/embed-cache.json keyed by input_hash, the hash of
+         that contextualized_text.
   2. Otherwise
        → no-op rerank: return candidates in input order with a synthesized
          note. Caller (retrieve.py) still gets a useful result; downstream
@@ -49,6 +50,7 @@ Exit codes:
 
 import argparse
 import fcntl
+import hashlib
 import importlib.util
 import json
 import math
@@ -108,11 +110,15 @@ PREFIX_SCHEMES = {
         "answer the query\nQuery: ", ""),
 }
 
-# Bumped whenever the embedding *input* changes shape. The cache is keyed by
-# chunk body_hash, which does not change when we start prefixing — without
-# this tag every cached vector would be served as if it were prefixed and the
-# fix would silently no-op on all 356 already-embedded chunks.
-EMBED_SCHEME = "v6-struck-out"  # 2026-10-06: ~~struck~~ text left the indexed text (v5 2026-09-04: status/replaced_by prefix)
+# The cache is keyed by each chunk's input_hash (below), the hash of the
+# contextualized text it is embedded from, so a change to that text — prefix
+# wording, a page's title, opening sentence or status, the struck-text rule —
+# re-embeds by itself. Until 2026-10-21 the key hashed the raw chunk, and a page
+# whose prefix changed kept its unchanged chunks on vectors of the old prefix
+# (2 of 589 that day). Bump this only for a change that text does not carry:
+# the per-model task prefixes (PREFIX_SCHEMES); the local backend's own input
+# handling has LOCAL_TAG.
+EMBED_SCHEME = "v7-exact-input"  # 2026-10-21: key = input_hash (v6 2026-10-06: ~~struck~~ text left the indexed text; v5 2026-09-04: status/replaced_by prefix)
 
 
 # Comma-separated WIKI_EMBED_MODEL fuses several rerankers (see rerank()).
@@ -185,7 +191,7 @@ LOCAL_TIMEOUT_SEC = 600
 LOCAL_MAX_CHARS = 8000
 # Vectors from different runtimes are not guaranteed bit-comparable, so the
 # local backend files its vectors under a tagged model name. The key keeps the
-# `<model>:<EMBED_SCHEME>:<body_hash>` shape bm25-index.py's GC parses.
+# `<model>:<EMBED_SCHEME>:<input_hash>` shape bm25-index.py's GC parses.
 LOCAL_TAG = "llamacpp2/"  # v2 (2026-09-26): --no-escape, so text is embedded verbatim like over HTTP
 
 # --- Cross-encoder stage (2026-10-17, A/B behind WIKI_CE) -------------------
@@ -394,7 +400,7 @@ def _live_key(k):
 def load_cache():
     """Load the embed cache, dropping vectors from a superseded embed scheme.
 
-    Keys are `{model}:{EMBED_SCHEME}:{body_hash}`. Anything else is from an
+    Keys are `{model}:{EMBED_SCHEME}:{input_hash}`. Anything else is from an
     older input shape (e.g. the pre-2026-07-29 unprefixed vectors) and is not
     comparable to freshly-embedded ones, so it is pruned rather than kept as
     dead weight — the cache was 2.3MB of vectors that could never be hit again.
@@ -481,6 +487,13 @@ def load_chunk(chunk_rel_path):
         return None
 
 
+def input_hash(chunk):
+    """Embed-cache key of a chunk: the hash of the text it is embedded from, the
+    same contextualized text BM25 indexes (bm25-index.py records it per chunk)."""
+    text = chunk.get("contextualized_text") or chunk.get("raw_text", "")
+    return "sha256:" + hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
 def _zscores(vals):
     mean = sum(vals) / len(vals)
     sd = math.sqrt(sum((v - mean) ** 2 for v in vals) / len(vals)) or 1.0
@@ -503,7 +516,7 @@ def dense_pick(q_vecs, cache, tag, pool, have, k):
         for cid, d in pool.items():
             if d["path"] in have:
                 continue
-            vec = cache.get(f"{tag}{model}:{EMBED_SCHEME}:{d['body_hash']}")
+            vec = cache.get(f"{tag}{model}:{EMBED_SCHEME}:{d['input_hash']}")
             if vec:
                 near.append((_cos(q, qn, vec), cid, d["path"]))
         near.sort(reverse=True)
@@ -524,7 +537,7 @@ def rerank(query, candidates, top_k=5, allow_remote=False,
     """Returns candidates list, possibly truncated to top_k, with rerank_score added.
     Falls back to input-order if the backend is unavailable (still adds rerank_source: 'noop').
 
-    dense_pool ({chunk_id: {"path", "body_hash"}}), dense_k and make_candidate
+    dense_pool ({chunk_id: {"path", "input_hash"}}), dense_k and make_candidate
     (chunk_id, path -> candidate or None) add the dense_k chunks nearest the
     query by cached vector that the caller's candidates miss: BM25 cannot put a
     page in front of the rerank when the query shares no word with it (an
@@ -572,7 +585,7 @@ def rerank(query, candidates, top_k=5, allow_remote=False,
         q_prefix, doc_prefix = prefix_scheme(model)
         texts, keys = [q_prefix + query], [None]
         for cid, chunk in chunk_of.items():
-            key = f"{tag}{model}:{EMBED_SCHEME}:{chunk.get('body_hash', '')}"
+            key = f"{tag}{model}:{EMBED_SCHEME}:{input_hash(chunk)}"
             if key not in cache and key not in keys:
                 texts.append(doc_prefix + (chunk.get("contextualized_text")
                                            or chunk.get("raw_text", "")))
@@ -622,7 +635,7 @@ def rerank(query, candidates, top_k=5, allow_remote=False,
             c = make_candidate(cid, path)
             chunk = load_chunk(path) if c else None
             # An index older than the chunk files would rank one text and score another.
-            if chunk and chunk.get("body_hash") == dense_pool[cid]["body_hash"]:
+            if chunk and input_hash(chunk) == dense_pool[cid]["input_hash"]:
                 c["dense"] = True
                 candidates.append(c)
                 chunk_of[id(c)] = chunk
@@ -632,7 +645,7 @@ def rerank(query, candidates, top_k=5, allow_remote=False,
         q_emb = results[model][0]
         scores = {}
         for cid, chunk in chunk_of.items():
-            emb = cache.get(f"{tag}{model}:{EMBED_SCHEME}:{chunk.get('body_hash', '')}")
+            emb = cache.get(f"{tag}{model}:{EMBED_SCHEME}:{input_hash(chunk)}")
             if emb:
                 scores[cid] = cosine(q_emb, emb)
         per_model[model] = scores
@@ -734,7 +747,7 @@ def embed_all(allow_remote, batch=64):
         _, doc_prefix = prefix_scheme(model)
         todo, seen = [], set()
         for chunk in chunks:
-            key = f"{tag}{model}:{EMBED_SCHEME}:{chunk.get('body_hash', '')}"
+            key = f"{tag}{model}:{EMBED_SCHEME}:{input_hash(chunk)}"
             if key in cache or key in seen:
                 continue
             seen.add(key)

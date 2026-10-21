@@ -26,6 +26,6 @@ skills/        save, wiki-apply (live), wiki-fold (retired record)
 
 - Tests: `bash maintenance/run-tests.sh` (pytest via `uv`).
 - Any retrieval change is measured before and after with the gate in the vault's `CLAUDE.md` §Acceptance gate: `python3 eval/run-eval.py --gold <set>` for the four gold sets, local hybrid and BM25-only (`WIKI_EMBED_URL=http://127.0.0.1:9`). `run-eval.py` prints the gold hash, the vault HEAD and this repo's HEAD.
-- Changing the embedding input needs an `EMBED_SCHEME` bump in `scripts/rerank.py`.
+- The embed cache is keyed by each chunk's `input_hash`, the hash of its contextualized text, so a change to that text re-embeds by itself; a change it does not carry (the per-model task prefixes) needs an `EMBED_SCHEME` bump in `scripts/rerank.py`.
 - Every script that sends vault text over HTTP checks its URL with `scripts/endpoint-guard.py` first: this machine, the LAN or the tailnet pass, a public address only with `WIKI_ALLOW_PUBLIC_ENDPOINTS=1` (or `--allow-remote-backend` on the embedders). A new caller does the same.
 - Nothing commits this repo automatically (the vault's SessionEnd hook commits only the vault's `wiki/` and `.vault-meta/`): commit your own work with its rationale, and push.

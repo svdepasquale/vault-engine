@@ -136,7 +136,7 @@ def load_chunks():
     out = []
     for p in sorted(_scan.CHUNKS.glob("*/*.json")):
         d = json.loads(p.read_text(encoding="utf-8"))
-        v = cache.get(_scan.QKEY + d.get("body_hash", ""))
+        v = cache.get(_scan.QKEY + _rerank.input_hash(d))
         if v:
             d["_path"] = p
             d["_id"] = f"{p.parent.name}/{p.stem}"

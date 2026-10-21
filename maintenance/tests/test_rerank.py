@@ -61,7 +61,7 @@ def test_dense_pick_takes_the_nearest_chunks_the_caller_missed(monkeypatch, tmp_
     vecs = {"m": {"h1": [1.0, 0.0], "h2": [0.8, 0.6], "h3": [0.0, 1.0]},
             "n": {"h1": [1.0, 0.0], "h2": [0.0, 1.0], "h3": [0.6, 0.8]}}
     cache = {f"{tag}{m}:{scheme}:{h}": v for m, by in vecs.items() for h, v in by.items()}
-    pool = {f"c{i}": {"path": f"p{i}", "body_hash": f"h{i}"} for i in (1, 2, 3)}
+    pool = {f"c{i}": {"path": f"p{i}", "input_hash": f"h{i}"} for i in (1, 2, 3)}
     q = [1.0, 0.0]
     assert mod.dense_pick({"m": q}, cache, tag, pool, {"p1"}, 1) == [("c2", "p2")]
     assert mod.dense_pick({"m": q}, cache, tag, pool, set(), 2) == [("c1", "p1"), ("c2", "p2")]
@@ -71,9 +71,25 @@ def test_dense_pick_takes_the_nearest_chunks_the_caller_missed(monkeypatch, tmp_
         ("c1", "p1"), ("c3", "p3"), ("c2", "p2")]
 
 
+def test_a_changed_prefix_is_a_cache_miss(monkeypatch, tmp_path):
+    # The key hashes the text that is embedded, not the raw chunk: a chunk whose
+    # own text is unchanged but whose page prefix changed must not get its old vector.
+    mod, _ = load(monkeypatch, tmp_path, "off")
+    old = {"raw_text": "body", "contextualized_text": "old prefix\n\nbody"}
+    new = {"raw_text": "body", "contextualized_text": "new prefix\n\nbody"}
+    assert mod.input_hash(old) != mod.input_hash(new)
+    assert mod.input_hash({"raw_text": "body"}) == mod.input_hash({"contextualized_text": "body"})
+    # bm25-index.py records the same hash for the dense pool and the cache GC
+    spec = importlib.util.spec_from_file_location("bm25_under_test", SCRIPT.parent / "bm25-index.py")
+    bm25 = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(bm25)
+    assert bm25.input_hash(new["contextualized_text"]) == mod.input_hash(new)
+
+
 def fake_backend(monkeypatch, mod, vecs, ce_scores=None):
-    chunks = {p: {"body_hash": p, "contextualized_text": p} for p in vecs}
-    cache = {f"{mod.LOCAL_TAG}m:{mod.EMBED_SCHEME}:{p}": v for p, v in vecs.items()}
+    chunks = {p: {"contextualized_text": p} for p in vecs}
+    cache = {f"{mod.LOCAL_TAG}m:{mod.EMBED_SCHEME}:{mod.input_hash(chunks[p])}": v
+             for p, v in vecs.items()}
     monkeypatch.setattr(mod, "pick_backend", lambda allow_remote: ("local", ["m"], None))
     monkeypatch.setattr(mod, "prefix_scheme", lambda model: ("", ""))
     monkeypatch.setattr(mod, "load_chunk", lambda path: chunks.get(path))
@@ -88,7 +104,8 @@ def test_rerank_adds_dense_candidates(monkeypatch, tmp_path):
     mod, _ = load(monkeypatch, tmp_path, "off")
     fake_backend(monkeypatch, mod, {"a": [0.0, 1.0], "b": [1.0, 0.0]})
     out = mod.rerank("q", [{"path": "a"}], top_k=None, dense_k=5,
-                     dense_pool={"x:0": {"path": "b", "body_hash": "b"}},
+                     dense_pool={"x:0": {"path": "b",
+                                         "input_hash": mod.input_hash({"contextualized_text": "b"})}},
                      make_candidate=lambda cid, path: {"chunk_id": cid, "path": path})
     assert [(c["path"], c.get("dense", False)) for c in out] == [("b", True), ("a", False)]
 
@@ -108,7 +125,8 @@ def test_an_empty_pool_stays_empty(monkeypatch, tmp_path):
     mod, _ = load(monkeypatch, tmp_path, "off")
     fake_backend(monkeypatch, mod, {"b": [1.0, 0.0]})
     assert mod.rerank("q", [], top_k=None, dense_k=20,
-                      dense_pool={"x:0": {"path": "b", "body_hash": "b"}},
+                      dense_pool={"x:0": {"path": "b",
+                                          "input_hash": mod.input_hash({"contextualized_text": "b"})}},
                       make_candidate=lambda cid, path: {"chunk_id": cid, "path": path}) == []
 
 

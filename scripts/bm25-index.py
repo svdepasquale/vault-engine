@@ -21,12 +21,14 @@ Index schema (.vault-meta/bm25/index.json):
   },
   "docs": {
     "<chunk_id>": {"path": ".vault-meta/chunks/c-000001/chunk-000.json", "dl": 487,
-                   "body_hash": "sha256:..."}
+                   "input_hash": "sha256:..."}
   }
 }
 
-`body_hash` (since 2026-10-17) lets retrieve.py look up every chunk's cached
-vectors without reading the chunk files, for its dense candidates.
+`input_hash` — the hash of the indexed text, which is also the embed-cache key
+(rerank.py input_hash; the raw chunk's `body_hash` from 2026-10-17 to 10-21) —
+lets retrieve.py look up every chunk's cached vectors without reading the chunk
+files, for its dense candidates.
 
 Chunk id format: "<page-address>:<chunk-index>" (e.g. "c-000042:3").
 
@@ -51,6 +53,7 @@ Exit codes:
 
 import argparse
 import fcntl
+import hashlib
 import json
 import math
 import os
@@ -135,8 +138,13 @@ def release_lock(fd):
         os.close(fd)
 
 
+def input_hash(text):
+    """The embed-cache key of a chunk's indexed text (rerank.py input_hash)."""
+    return "sha256:" + hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
 def discover_chunks():
-    """Yield (chunk_id, path, contextualized_text, body_hash) for every chunk on disk.
+    """Yield (chunk_id, path, contextualized_text, input_hash) for every chunk on disk.
 
     The yielded `path` is relative to the directory two levels above CHUNKS_DIR
     (i.e. .vault-meta/chunks/<addr>/ → relative to the vault root). This works
@@ -160,7 +168,7 @@ def discover_chunks():
             continue
         chunk_id = f"{address}:{idx}"
         rel_path = str(chunk_file.relative_to(rel_root))
-        yield chunk_id, rel_path, text, data.get("body_hash")
+        yield chunk_id, rel_path, text, input_hash(text)
 
 
 def build_index():
@@ -168,10 +176,10 @@ def build_index():
     df = Counter()
     postings = defaultdict(list)
 
-    for chunk_id, rel_path, text, body_hash in discover_chunks():
+    for chunk_id, rel_path, text, text_hash in discover_chunks():
         tokens = tokenize(text)
         tf = Counter(tokens)
-        docs[chunk_id] = {"path": rel_path, "dl": len(tokens), "body_hash": body_hash}
+        docs[chunk_id] = {"path": rel_path, "dl": len(tokens), "input_hash": text_hash}
         for term, count in tf.items():
             df[term] += 1
             postings[term].append([chunk_id, count])
@@ -206,8 +214,8 @@ def write_index(index):
             tmp.unlink(missing_ok=True)
 
 
-def live_body_hashes():
-    """Collect the body_hash of every chunk currently on disk."""
+def live_input_hashes():
+    """Collect the input_hash of every chunk currently on disk."""
     hashes = set()
     if not CHUNKS_DIR.is_dir():
         return hashes
@@ -216,9 +224,7 @@ def live_body_hashes():
             data = json.loads(chunk_file.read_text(encoding="utf-8"))
         except (json.JSONDecodeError, OSError):
             continue
-        bh = data.get("body_hash")
-        if bh:
-            hashes.add(bh)
+        hashes.add(input_hash(data.get("contextualized_text") or data.get("raw_text", "")))
     return hashes
 
 
@@ -226,9 +232,9 @@ def gc_embed_cache():
     """Prune rerank's embed cache of entries whose chunk no longer exists.
 
     Best-effort: the cache only stores content-addressed embeddings (key
-    `<model>:<body_hash>`), so a stale entry is never wrongly read — it is
-    pure disk bloat. We therefore skip silently on any contention or error
-    rather than failing the build. Uses LOCK_NB so a concurrent rerank writer
+    `<model>:<EMBED_SCHEME>:<input_hash>`), so a stale entry is never wrongly
+    read — it is pure disk bloat. We therefore skip silently on any contention
+    or error rather than failing the build. Uses LOCK_NB so a concurrent rerank writer
     is never blocked. Mirrors tiling-check.py's orphan-cache GC.
     """
     if not EMBED_CACHE_PATH.is_file():
@@ -245,20 +251,20 @@ def gc_embed_cache():
             return
         if not isinstance(cache, dict) or not cache:
             return
-        live = live_body_hashes()
-        # key == "<model>:<EMBED_SCHEME>:<body_hash>" (rerank.py), and
-        # body_hash is itself "sha256:<hex>" — so the hash is the LAST TWO
+        live = live_input_hashes()
+        # key == "<model>:<EMBED_SCHEME>:<input_hash>" (rerank.py), and
+        # input_hash is itself "sha256:<hex>" — so the hash is the LAST TWO
         # colon-separated segments, not everything after the first colon.
         # Splitting on the first colon yielded "<EMBED_SCHEME>:sha256:<hex>",
         # which never matches a live hash, so every vector looked orphaned and
         # each `bm25-index.py build` silently zeroed the whole cache. Live
         # since EMBED_SCHEME was added on 2026-07-29; found 2026-08-25 with the
         # cache at 148 entries and the GC proposing to delete all 148.
-        def body_hash_of(k):
+        def hash_of(k):
             parts = k.split(":")
             return ":".join(parts[-2:]) if len(parts) >= 3 else None
         dead = [k for k in cache
-                if body_hash_of(k) is None or body_hash_of(k) not in live]
+                if hash_of(k) is None or hash_of(k) not in live]
         if not dead:
             return
         for k in dead:

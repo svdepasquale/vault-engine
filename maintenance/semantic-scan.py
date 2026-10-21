@@ -102,7 +102,7 @@ def load_pairs(limit, min_cos):
         page = d.get("page_path", "")
         if SKIP.match(page):
             continue
-        v = cache.get(QKEY + d.get("body_hash", ""))
+        v = cache.get(QKEY + _rerank.input_hash(d))
         if not v:
             continue
         n = math.sqrt(sum(x * x for x in v))

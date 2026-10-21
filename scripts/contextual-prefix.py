@@ -286,8 +286,8 @@ def synthetic_prefix(fm, body, chunk_text):
     # Status-aware tail (2026-09-04): a stale page that stays indexed because it
     # is still the canonical answer to something (a replaced tool, a retired machine) must say
     # so in every chunk, or a retrieved chunk reads as current fact. Bumping
-    # EMBED_SCHEME in rerank.py was part of the same change — the embed cache is
-    # keyed on the raw chunk, so a prefix change alone would serve stale vectors.
+    # EMBED_SCHEME in rerank.py was part of the same change: the embed cache was
+    # keyed on the raw chunk then (on the embedded text since 2026-10-21).
     status = (fm.get("status") or "").strip().lower()
     if status in STALE_STATUSES:
         prefix += f" Page status: {status}."
