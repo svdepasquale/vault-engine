@@ -82,10 +82,13 @@ CACHE_LOCK = META_DIR / ".embed-cache.lock"
 DEFAULT_EMBED_URL = "http://127.0.0.1:1234"
 # WIKI_EMBED_MODEL swaps the embedder without editing this file. The cache key
 # carries the model name, so vectors from different models coexist safely and
-# an A/B does not thrash the cache.
+# an A/B does not thrash the cache. Until 2026-10-22 the default fused
+# nomic-embed-text, an English model, with qwen3-0.6b. Alone, qwen3-0.6b put the
+# answer chunk in the top 3 for more Italian queries over English pages
+# (22 → 27 of 30) and the recall hook on more right pages (32 → 34 of 42); three
+# English answers moved down from the top chunk, none left the top 3.
 DEFAULT_MODEL = os.environ.get(
     "WIKI_EMBED_MODEL",
-    "text-embedding-nomic-embed-text-v1.5@f16,"
     "text-embedding-qwen3-embedding-0.6b")
 
 # nomic-embed-text is task-prefix-conditioned: it was trained with an
@@ -165,8 +168,8 @@ MODEL_FAMILY = model_family(MODELS[0])
 # BM25-only calls between 2026-09-04 and 09-25. The local backend runs
 # Homebrew's `llama-embedding` on the SAME GGUF files LM Studio serves, once
 # per query, then exits — nothing stays resident. Measured on the M1 Max:
-# nomic f16 0.17 s / 377 MB, qwen3-0.6b Q8 0.60 s / 1.3 GB per query, both
-# models in parallel. It is the default whenever the binary and the GGUFs are
+# nomic f16 0.17 s / 377 MB, qwen3-0.6b Q8 0.60 s / 1.3 GB per query; fused
+# models run in parallel. It is the default whenever the binary and the GGUFs are
 # present; WIKI_EMBED_URL forces the HTTP backend (LM Studio, a remote llama-server).
 LLAMA_EMBEDDING = (os.environ.get("WIKI_LLAMA_EMBEDDING")
                    or shutil.which("llama-embedding")

@@ -3,8 +3,9 @@
 
 Pipeline (v1.7):
   query  →  bm25-index.py query (top-K candidates by BM25 over contextualized chunks)
-         →  rerank.py        (cosine on nomic-embed-text vectors via ollama,
-                              or no-op if ollama unavailable; since 2026-10-17
+         →  rerank.py        (cosine on qwen3-embedding-0.6b vectors from a
+                              local llama-embedding, or no-op without an
+                              embedder; since 2026-10-17
                               a short BM25 pool is filled with the chunks
                               nearest the query by cached vector, so a page
                               BM25 cannot see — an Italian query over English
@@ -18,12 +19,12 @@ gracefully when index or rerank stage is missing:
                                                   caller falls back to v1.6 legacy
                                                   hot→index→drill read order.
 - If .vault-meta/chunks/ is empty              → exit 10 (same).
-- If rerank stage cannot embed (no ollama)     → no-op rerank, returns BM25 order.
+- If rerank stage cannot embed (no embedder)   → no-op rerank, returns BM25 order.
 
 Output schema (JSON to stdout):
 {
   "query": "...",
-  "strategy": "bm25+rerank:cosine:nomic-embed-text" | "bm25+noop-rerank",
+  "strategy": "bm25+rerank:cosine:llamacpp2/text-embedding-qwen3-embedding-0.6b" | "bm25+noop-…",
   "top_k": 5,
   "candidates": [
     {
@@ -34,7 +35,7 @@ Output schema (JSON to stdout):
       "chunk_index": 3,
       "bm25_score": 7.12,
       "rerank_score": 0.81,
-      "rerank_source": "cosine:nomic-embed-text",
+      "rerank_source": "cosine:llamacpp2/text-embedding-qwen3-embedding-0.6b",
       "snippet": "... first 200 chars of the chunk ..."
     },
     ...
