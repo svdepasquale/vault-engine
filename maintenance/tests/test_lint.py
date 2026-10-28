@@ -180,3 +180,16 @@ def test_brief_is_empty_on_a_clean_vault(lint_module, tmp_path, monkeypatch):
     write(tmp_path / "entities/a.md", graph_page("a", fm='relations:\n  hosted_on: "[[b]]"\n') + "[[b]]\n")
     write(tmp_path / "entities/b.md", graph_page("b", fm='relations:\n  hosts: "[[a]]"\n') + "[[a]]\n")
     assert brief(lint_module, monkeypatch) == []
+
+
+def hot_findings(mod, monkeypatch) -> list[dict]:
+    return [f for f in run(mod, monkeypatch) if f["type"] == "hot_oversize"]
+
+
+def test_hot_oversize_counts_bytes_not_lines(lint_module, tmp_path, monkeypatch):
+    # The hook limit is in characters: 80 long lines pass it, 160 short ones
+    # do not come near it. The old 150-line cap had both backwards.
+    write(tmp_path / "hot.md", ("w" * 149 + "\n") * 80)
+    assert hot_findings(lint_module, monkeypatch) == [{"type": "hot_oversize", "bytes": 12000, "max": 7168}]
+    write(tmp_path / "hot.md", "short line\n" * 160)
+    assert hot_findings(lint_module, monkeypatch) == []

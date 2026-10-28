@@ -8,7 +8,7 @@ Findings:
 - frontmatter_invalid_type: type not in allowed set
 - duplicate_title: same H1/name in multiple pages
 - stale: updated > 90 days ago; skipped for status evergreen/archived, index:false, folds/
-- hot_oversize: hot.md > 150 lines
+- hot_oversize: hot.md > HOT_MAX_BYTES (7168), the budget its injecting hooks check
 - log_oversize: log.md > 500 lines (cannot fire since log.md froze at 436 lines, 2026-09-26)
 - relation_unknown_predicate: a `relations:` key outside the typed-graph vocabulary
 - relation_missing_inverse: an edge between two entity/source pages whose
@@ -58,7 +58,13 @@ PREDICATES = set(INVERSE) | {"depends_on", "part_of", "related_to"}
 GRAPH_TYPES = {"entity", "source"}
 REL_KEY = re.compile(r"^(\s+)([A-Za-z_][\w-]*):(.*)$")
 # Age and size findings are maintenance signals, not write errors: --brief skips them.
+# hot_oversize has its live alarm in the SessionStart and Stop hooks anyway.
 BRIEF_SKIP = {"stale", "hot_oversize", "log_oversize"}
+# hot.md reaches the model whole through a SessionStart hook, and Claude Code
+# hands a hook's context over 10,000 characters to the model as a 2 KB preview
+# (2.1.310: 10,000 whole, 10,001 preview). Bytes track that limit, lines do not:
+# 80 lines of prose already pass it. 7 KB leaves room for what the hook appends.
+HOT_MAX_BYTES = 7168
 
 def parse_fm(text: str) -> dict:
     m = FRONTMATTER.match(text)
@@ -284,9 +290,9 @@ def main(brief: bool = False, only: set[str] | None = None):
 
     hot = VAULT / "hot.md"
     if hot.exists():
-        n = len(hot.read_text().splitlines())
-        if n > 150:
-            findings.append({"type": "hot_oversize", "lines": n})
+        size = hot.stat().st_size
+        if size > HOT_MAX_BYTES:
+            findings.append({"type": "hot_oversize", "bytes": size, "max": HOT_MAX_BYTES})
 
     logf = VAULT / "log.md"
     if logf.exists():
