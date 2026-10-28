@@ -4,7 +4,8 @@
 # lint, then asks an LLM to draft conservative fix proposals: local LM
 # Studio with qwen/qwen3.8-27b by default (since 2026-08-27), a remote
 # llama-server (Qwen3.8-Flash-Next) only with WIKI_LINT_BACKEND=evo + WIKI_LINT_EVO_URL, and no fallback
-# between them (step 0b). Never writes inside the vault; only deposits a
+# between them (step 0b). Writes inside the vault only through step 2a's
+# whitelisted frontmatter autofix, committed by name; otherwise it deposits a
 # proposal file gated by a PENDING flag.
 set -euo pipefail
 
@@ -345,18 +346,14 @@ osascript -e "display notification \"auto=$AUTO defer=$DEFER (of $COUNT findings
 
 echo "=== done ==="
 
-# 6. commit + push. Pipeline-owned (Obsidian and obsidian-git are gone since
-#    2026-09-25; wiki-autocommit.sh covers interactive sessions). Without this, multi-day
-#    drift accumulates locally (verified 2026-05-09 → 2026-05-16, 7d
-#    gap with Obsidian closed). Scoped to wiki/ and .vault-meta/ since
-#    2026-10-04, like wiki-autocommit.sh: code is its author's to commit.
+# 6. push. The run's only tracked writes are step 2a's autofix pages,
+#    committed there by name; everything else lands in the ignored .lint/.
+#    Until 2026-10-28 this step also staged `git add -A -- wiki .vault-meta`
+#    and committed it, but by then a dirty tree could only hold another live
+#    session's edits, possibly half-written, which went out under this run's
+#    message. Leftovers are wiki-autocommit.sh's job, at session end.
 (
   cd "$VAULT_ROOT"
-  if [ -n "$(git status --porcelain -- wiki .vault-meta)" ]; then
-    git add -A -- wiki .vault-meta
-    git commit -m "wiki-maintenance: auto-commit $(date -Iseconds)" -- wiki .vault-meta >/dev/null
-    echo "git: committed"
-  fi
   if [ "$(git rev-list --count @{u}..HEAD 2>/dev/null || echo 0)" -gt 0 ]; then
     if git push --quiet origin HEAD; then
       echo "git: pushed"
