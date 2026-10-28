@@ -2,7 +2,7 @@
 
 Retrieval, maintenance and evaluation tooling for a plain-markdown knowledge vault that serves as Claude Code's long-term memory.
 
-- **Retrieval** — paragraph chunks with a synthetic page prefix, a BM25 index, and a local embedding rerank (Homebrew `llama-embedding`, nothing resident) fused by z-scored scores; chunk-level output sized for an LLM's context.
+- **Retrieval** — paragraph chunks with a synthetic page prefix, a BM25 index, and a local embedding rerank (Homebrew `llama-embedding` with qwen3-embedding-0.6B, nothing resident; several embedders listed in `WIKI_EMBED_MODEL` are fused by per-query z-scores); chunk-level output sized for an LLM's context.
 - **Maintenance** — deterministic lint (links, frontmatter, typed-relation predicates and inverses; a `--brief` form for a session-start hook, `--only` for the pages a session just changed), a frontmatter check that YAML reads each page the way the line-based readers do, and autofix, local-LLM fix proposals behind a judge, a semantic scan for contradictions and duplicates across pages, a consolidation signal for pages that have grown into journals, and an ideation ("dream") pass.
 - **Evaluation** — a gold-set harness (page recall, MRR, and knowledge-update scoring: does the *current* fact win over a stale one).
 
