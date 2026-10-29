@@ -18,7 +18,10 @@ stages, run by hand now and then:
    appears in its passage (whitespace- and Markdown-insensitive).
 
 Output: a proposals markdown file for Claude to verify and apply by hand; the
-model never edits a page. Nothing is written into wiki/. The judge's URL passes
+model never edits a page. Nothing is written into wiki/ outside its untracked
+.lint/, where --dump also stamps .last-learning: a dump starts a round of
+Claude's judging, and the caller's SessionStart hook reminds when that date
+gets old (the round is on demand, never on a timer). The judge's URL passes
 scripts/endpoint-guard.py first: this machine, the LAN or the tailnet, never a
 public address unless WIKI_ALLOW_PUBLIC_ENDPOINTS=1.
 """
@@ -30,6 +33,7 @@ import re
 import sys
 import time
 import urllib.request
+from datetime import datetime
 from pathlib import Path
 
 # Data and code are separate repos since 2026-10-06: this file belongs to vault-engine,
@@ -37,6 +41,7 @@ from pathlib import Path
 VAULT_ROOT = Path(os.environ.get("WIKI_VAULT") or Path.home() / "projects" / "knowledge-vault").resolve()
 CHUNKS = VAULT_ROOT / ".vault-meta" / "chunks"
 CACHE = VAULT_ROOT / ".vault-meta" / "embed-cache.json"
+LEARNING_STAMP = VAULT_ROOT / "wiki" / ".lint" / ".last-learning"   # read by the caller's SessionStart hook
 ENGINE_SCRIPTS = Path(__file__).resolve().parent.parent / "scripts"
 sys.path.insert(0, str(ENGINE_SCRIPTS))
 import importlib.util as _ilu
@@ -207,6 +212,9 @@ def dump(pairs, top, out):
                   f"### B `{db['_id']}`", "", db.get("raw_text", "").strip(), ""]
     lines += [f"## Page pairs linking neither way ({len(unlinked)} of {len(pairs)})", ""] + unlinked
     out.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    # The round's only scripted step, so its date is the round's (`date -Iseconds` shape).
+    LEARNING_STAMP.parent.mkdir(parents=True, exist_ok=True)
+    LEARNING_STAMP.write_text(datetime.now().astimezone().isoformat(timespec="seconds") + "\n", encoding="utf-8")
     print(f"{min(top, len(pairs))} passage pairs, {len(unlinked)} unlinked page pairs -> {out}")
     return 0
 
