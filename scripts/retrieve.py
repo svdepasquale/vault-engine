@@ -10,6 +10,8 @@ Pipeline (v1.7):
                               nearest the query by cached vector, so a page
                               BM25 cannot see — an Italian query over English
                               pages — still competes)
+         →  fold prior       (since 2026-11-07 chunks of wiki/folds/, the log's
+                              history rollups, rank at 0.95x; WIKI_FOLD_WEIGHT)
          →  drill            (return chunk pages with absolute paths so the
                               caller can Read them and synthesize)
 
@@ -81,6 +83,45 @@ EXIT_NOT_PROVISIONED = 10
 # Cap per-chunk text in --chunks mode. Chunks average ~2.3k chars; anything
 # beyond this is a chunking anomaly, not signal worth paying tokens for.
 MAX_CHUNK_TEXT = 6000
+
+# History prior (2026-11-07): the log's rollups under wiki/folds/ are history
+# that a current page usually supersedes, yet with the reranker alone a fold
+# chunk restating an old state could edge out the current answer by a few
+# hundredths of cosine (0.010-0.022 on the three knowledge-update items it
+# flipped). Fold chunks' ranking score — the raw cosine when a reranker ran, the
+# BM25 score when it did not — is scaled by FOLD_WEIGHT. 0.95 was set from those
+# margins before measuring; it passed the gate on every set in both modes, a
+# history probe whose answers live in folds, and the recall hook's calibration
+# set. WIKI_FOLD_WEIGHT=1 restores the old order. The raw cosines that recall.py
+# thresholds on are not touched.
+FOLD_PREFIX = "wiki/folds/"
+FOLD_WEIGHT = 0.95
+
+
+def fold_weight():
+    """FOLD_WEIGHT, or WIKI_FOLD_WEIGHT when it is set."""
+    raw = os.environ.get("WIKI_FOLD_WEIGHT", "").strip()
+    if not raw:
+        return FOLD_WEIGHT
+    try:
+        return float(raw)
+    except ValueError:
+        log(f"WARN: WIKI_FOLD_WEIGHT={raw!r} is not a number — using {FOLD_WEIGHT}")
+        return FOLD_WEIGHT
+
+
+def apply_fold_weight(cands, w):
+    """Scale the ranking score of fold chunks by w, in place."""
+    if w == 1.0:
+        return cands
+    for c in cands:
+        if str(c.get("rerank_source", "")).startswith("noop"):
+            # without a reranker every rerank_score is 0 and the stable sort in
+            # main() keeps BM25 order; rank on the BM25 score instead
+            c["rerank_score"] = c.get("bm25_score") or 0.0
+        if (c.get("page_path") or "").startswith(FOLD_PREFIX):
+            c["rerank_score"] = (c.get("rerank_score") or 0.0) * w
+    return cands
 
 
 def log(msg):
@@ -226,6 +267,8 @@ def main():
         # Derive strategy from first candidate's rerank_source
         first_src = (final[0].get("rerank_source") if final else "unknown")
         strategy = f"bm25+rerank:{first_src}"
+
+    apply_fold_weight(final, fold_weight())
 
     # Dedupe by page (we may have multiple chunks of the same page; collapse to
     # best). In --chunks mode dedupe by chunk_id instead: distinct chunks of the
