@@ -12,7 +12,7 @@ The code that runs Claude's long-term memory: retrieval, maintenance, ideation, 
 ```
 scripts/       retrieval: contextual-prefix (chunks), bm25-index, rerank (local llama-embedding), retrieve, recall hook; address/lock helpers; endpoint-guard
 maintenance/   wiki-maintenance.sh (lint → autofix → LLM proposals → judge → PENDING), fm-validate, semantic-scan, dream + dream-claude.workflow.js, consolidation-due; tests/; launchd/ (on demand)
-eval/          run-eval.py — the gold sets it reads are vault data
+eval/          run-eval.py (the gate), neighbors.py (where the answer sits when the right page returns the wrong chunk) — the gold sets they read are vault data
 skills/        save, wiki-apply (live), wiki-fold (retired record)
 ```
 
