@@ -43,3 +43,11 @@ def test_a_non_utf8_page_does_not_abort_the_run(monkeypatch, tmp_path):
     mod = load(monkeypatch, vault)
     assert run_all(monkeypatch, mod) == 0
     assert {r["page_path"] for r in chunk_records(mod)} == {"wiki/things/good.md", "wiki/things/bad.md"}
+
+
+def test_a_vault_under_a_dot_directory_still_yields_its_pages(monkeypatch, tmp_path):
+    vault = tmp_path / ".hidden" / "vault"
+    write_page(vault, "wiki/things/alpha.md", "name: alpha\ntype: entity")
+    write_page(vault, "wiki/.drafts/skip.md", "name: skip\ntype: entity")   # a dot-dir inside the vault is still skipped
+    mod = load(monkeypatch, vault)
+    assert [p.relative_to(mod.VAULT_ROOT).as_posix() for p in mod.collect_pages("--all")] == ["wiki/things/alpha.md"]

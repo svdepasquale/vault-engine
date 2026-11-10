@@ -603,7 +603,9 @@ def gc_chunk_dirs(live_addresses, dry_run=False):
 def collect_pages(target):
     if target == "--all" or target is None:
         return sorted(p for p in WIKI_DIR.rglob("*.md")
-                      if not any(part.startswith(".") for part in p.parts)
+                      # Parts relative to the vault: a vault cloned under a
+                      # dot-directory must still yield its pages.
+                      if not any(part.startswith(".") for part in p.relative_to(VAULT_ROOT).parts)
                       and str(p.relative_to(VAULT_ROOT)) not in EXCLUDE_PAGES
                       and page_is_indexed(p))
     p = Path(target)
