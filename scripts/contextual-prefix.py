@@ -84,8 +84,11 @@ META_DIR = VAULT_ROOT / ".vault-meta"
 CHUNKS_DIR = META_DIR / "chunks"
 
 CHUNK_TARGET_TOKENS = 500  # rough; we approximate via chars/4
-CHUNK_TARGET_CHARS = CHUNK_TARGET_TOKENS * 4
-CHUNK_OVERLAP_CHARS = 200
+# Both sizes can be set from the environment to replay a chunk-size run on the
+# gate. Half the target (1000 / 100) was measured on 2026-11-10 and lost answer
+# evidence on both standard sets, at three results and at six (equal tokens).
+CHUNK_TARGET_CHARS = int(os.environ.get("WIKI_CHUNK_TARGET_CHARS") or CHUNK_TARGET_TOKENS * 4)
+CHUNK_OVERLAP_CHARS = int(os.environ.get("WIKI_CHUNK_OVERLAP_CHARS") or 200)
 
 # Pages excluded from --all indexing (explicit single-path runs bypass this).
 # log.md: append-only operation log — mentions every topic, so it BM25-matches
@@ -263,9 +266,11 @@ def chunk_body(body, target_chars=CHUNK_TARGET_CHARS, overlap=CHUNK_OVERLAP_CHAR
     chunks = []
     cur = []
     cur_len = 0
+    fresh = False   # cur holds text of its own, not only the previous chunk's tail
     for p in paragraphs:
         cur.append(p)
         cur_len += len(p) + 2
+        fresh = True
         if cur_len >= target_chars:
             chunk_text = "\n\n".join(cur)
             chunks.append(chunk_text)
@@ -273,7 +278,11 @@ def chunk_body(body, target_chars=CHUNK_TARGET_CHARS, overlap=CHUNK_OVERLAP_CHAR
             tail = clean_overlap_tail(chunk_text, overlap)
             cur = [tail] if tail else []
             cur_len = len(tail)
-    if cur and "".join(cur).strip():
+            fresh = False
+    # A page whose last paragraph closed a chunk leaves only the overlap seed
+    # behind: emitting it made a final chunk of ~200 characters that repeated
+    # the end of the one before and could take a result slot (2026-11-10).
+    if cur and fresh and "".join(cur).strip():
         chunks.append("\n\n".join(cur))
     if not chunks and body.strip():
         # tiny page — single chunk

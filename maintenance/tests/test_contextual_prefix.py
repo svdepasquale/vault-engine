@@ -56,3 +56,12 @@ def test_a_record_of_another_prefix_scheme_is_rewritten(monkeypatch, tmp_path):
     third, recs = records(mod, path)
     assert third["written"] == ["chunk-000.json"]
     assert "(untitled)" not in recs[0]["prefix"]
+
+
+def test_no_final_chunk_that_only_repeats_the_previous_one(monkeypatch, tmp_path):
+    mod = load(monkeypatch, tmp_path)
+    paras = [f"Paragraph {i}: a sentence of the page that fills the chunk up to its target. " * 9 for i in range(4)]
+    closes_at_the_end = mod.chunk_body("\n\n".join(paras[:3]), target_chars=2000, overlap=200)
+    assert len(closes_at_the_end) == 1                      # the overlap seed alone is not a chunk
+    longer = mod.chunk_body("\n\n".join(paras), target_chars=2000, overlap=200)
+    assert len(longer) == 2 and longer[1].endswith(paras[3].strip())   # real text after the seed stays
