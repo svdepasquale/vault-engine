@@ -38,6 +38,7 @@ Chunk schema written to .vault-meta/chunks/<page-address>/chunk-NNN.json:
   "raw_text": "...",
   "contextualized_text": "<prefix> <raw_text>",
   "prefix_source": "anthropic-api" | "claude-cli" | "synthetic" | "skipped",
+  "prefix_scheme": 2,            # PREFIX_SCHEME when written; another value = rewrite
   "char_count": 487,
   "body_hash": "sha256:...",     # of raw_text
   "page_body_hash": "sha256:...", # of the WHOLE source page (for invalidation)
@@ -138,6 +139,13 @@ WIKILINK_RE = re.compile(r"\[\[([^\]|]+)(?:\|[^\]]*)?\]\]")
 # (borrowed from agentmemory's "recall hygiene"; EMBED_SCHEME v6 in rerank.py).
 # Never across a paragraph break, so a stray `~~` cannot swallow a page.
 STRUCK_RE = re.compile(r"~~(?=\S)(?:(?!~~|\n\n).)+?~~", re.DOTALL)
+
+# Version of the synthetic prefix's wording and inputs, stored in every chunk
+# record. A chunk is rewritten when its record carries another value, so a
+# change to the prefix reaches the pages nobody edits — on every clone, at its
+# next run. Bump it with any such change. 2 (2026-11-10): the title falls back
+# to the page's file name instead of "(untitled)".
+PREFIX_SCHEME = 2
 
 
 def strip_struck(text):
@@ -454,6 +462,9 @@ def process_page(page_path, force_synthetic=False, rebuild=False, peek=False,
                  allow_egress=False, progress_label=""):
     body = read_page(page_path)
     fm, content = parse_frontmatter(body)
+    # `title` is optional in the page schema. Without it every chunk's prefix
+    # said "(untitled)"; the file name is what most pages carry as title anyway.
+    fm["title"] = fm.get("title") or page_path.stem
     address = fm.get("address") or derive_synthetic_address(page_path)
     page_body_hash = sha256(body)
 
@@ -509,7 +520,8 @@ def process_page(page_path, force_synthetic=False, rebuild=False, peek=False,
             try:
                 existing = json.loads(chunk_path.read_text(encoding="utf-8"))
                 if existing.get("body_hash") == body_hash and \
-                   existing.get("page_body_hash") == page_body_hash:
+                   existing.get("page_body_hash") == page_body_hash and \
+                   existing.get("prefix_scheme", 1) == PREFIX_SCHEME:
                     skipped += 1
                     continue
             except (json.JSONDecodeError, OSError):
@@ -532,6 +544,7 @@ def process_page(page_path, force_synthetic=False, rebuild=False, peek=False,
             "contextualized_text": contextualized,
             "prefix": prefix or "",
             "prefix_source": prefix_source,
+            "prefix_scheme": PREFIX_SCHEME,
             "char_count": len(raw),
             "body_hash": body_hash,
             "page_body_hash": page_body_hash,
