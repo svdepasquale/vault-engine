@@ -119,7 +119,7 @@ def test_description_body_too_thin_defers(judge_module):
     write_page(vault, "entities/foo.md", {"title": "Foo"}, "tiny")
     prop = {"type": "update-frontmatter", "target": "entities/foo.md",
             "action": {"description":
-                       "Self-hosted k3s platform serving a static site and a password manager"}}
+                       "Command-line tool that turns recipe cards into printable booklets"}}
     verdict, _ = mod.judge(prop, lint_targets={"entities/foo.md"})
     assert verdict == "defer"
 
@@ -127,11 +127,11 @@ def test_description_body_too_thin_defers(judge_module):
 def test_description_dup_title_defers(judge_module):
     mod, vault = judge_module
     write_page(vault, "entities/foo.md",
-               {"title": "Self-hosted k3s platform serving a static site and a password manager"},
+               {"title": "Command-line tool that turns recipe cards into printable booklets"},
                "x" * 250)
     prop = {"type": "update-frontmatter", "target": "entities/foo.md",
             "action": {"description":
-                       "Self-hosted k3s platform serving a static site and a password manager"}}
+                       "Command-line tool that turns recipe cards into printable booklets"}}
     verdict, _ = mod.judge(prop, lint_targets={"entities/foo.md"})
     assert verdict == "defer"
 
@@ -141,7 +141,7 @@ def test_description_happy_path(judge_module):
     write_page(vault, "entities/foo.md", {"title": "Foo"}, "x" * 250)
     prop = {"type": "update-frontmatter", "target": "entities/foo.md",
             "action": {"description":
-                       "Self-hosted k3s platform serving a static site and a password manager"}}
+                       "Command-line tool that turns recipe cards into printable booklets"}}
     verdict, _ = mod.judge(prop, lint_targets={"entities/foo.md"})
     assert verdict == "auto"
 
@@ -229,12 +229,12 @@ def test_parse_handles_json_wrapper(judge_module):
         "rationale: derive\n"
         "action:\n"
         "```yaml\n"
-        '{"description": "Self-hosted platform with a site, a vault and a feed reader"}\n'
+        '{"description": "Small library that parses train timetables into a calendar"}\n'
         "```\n"
     )
     parsed = mod.parse_proposal_block(block)
     assert parsed["action"] == {
-        "description": "Self-hosted platform with a site, a vault and a feed reader"
+        "description": "Small library that parses train timetables into a calendar"
     }
 
 

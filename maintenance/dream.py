@@ -420,7 +420,7 @@ def main():
     args = ap.parse_args()
 
     if args.band is None:
-        # With --focus, p50-p90 paired the NAS with a service-mesh design page;
+        # With --focus, p50-p90 paired the focus page with pages far from its topic;
         # p70-p100 gave its nearest unlinked pages (2026-10-03, one run).
         args.band = (70, 100) if args.focus else (50, 90)
     url, model = BACKENDS[args.backend]
