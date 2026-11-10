@@ -239,7 +239,9 @@ def main():
                               for h in bm25_hits) if c]
 
     if args.no_rerank:
-        final = candidates[:args.top]
+        # All candidates, as in the rerank branch: the per-page cap below needs
+        # them to fill a capped slot; the final slice truncates to --top.
+        final = candidates
         strategy = "bm25-only"
         for c in final:
             c["rerank_score"] = c["bm25_score"]

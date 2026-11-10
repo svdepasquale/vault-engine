@@ -1,6 +1,12 @@
-"""Pytest suite for scripts/retrieve.py's fold prior (synthetic candidates, no index)."""
+"""Pytest suite for scripts/retrieve.py: the fold prior (synthetic candidates)
+and the --no-rerank path (a small synthetic index)."""
 from __future__ import annotations
+
 import importlib.util
+import json
+import os
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -61,3 +67,25 @@ def test_without_a_reranker_it_ranks_on_the_bm25_score(monkeypatch, tmp_path):
 def test_a_bad_value_falls_back_to_the_default(monkeypatch, tmp_path):
     mod = load(monkeypatch, tmp_path, "abc")
     assert mod.fold_weight() == 0.95
+
+
+def test_no_rerank_fills_a_capped_slot_from_the_next_page(tmp_path):
+    vault = tmp_path / "vault"
+    chunks = vault / ".vault-meta" / "chunks"
+    texts = {("c-000001", i): f"walrus walrus walrus tusks part {i}" for i in range(4)}
+    texts[("c-000002", 0)] = "walrus seen once on a beach"
+    for (addr, i), text in texts.items():
+        d = chunks / addr
+        d.mkdir(parents=True, exist_ok=True)
+        page = "wiki/things/long.md" if addr == "c-000001" else "wiki/things/short.md"
+        (d / f"chunk-{i:03d}.json").write_text(json.dumps({
+            "page_path": page, "page_address": addr, "chunk_index": i,
+            "raw_text": text, "contextualized_text": text}), encoding="utf-8")
+    env = {**os.environ, "WIKI_VAULT": str(vault)}
+    scripts = SCRIPT.parent
+    subprocess.run([sys.executable, str(scripts / "bm25-index.py"), "build"], env=env,
+                   check=True, capture_output=True)
+    out = subprocess.run([sys.executable, str(SCRIPT), "walrus", "--no-rerank", "--top", "3",
+                          "--chunks", "--compact"], env=env, check=True, capture_output=True, text=True)
+    pages = [c["page"] for c in json.loads(out.stdout)["candidates"]]
+    assert pages == ["wiki/things/long.md", "wiki/things/long.md", "wiki/things/short.md"]
