@@ -325,8 +325,9 @@ echo "judge: auto=$AUTO defer=$DEFER"
 
 AUTO_FILE="$LINT_DIR/proposals-auto-$DATE.md"
 if [ -f "$AUTO_FILE" ]; then
-  AUTO_BLOCKS=$(grep -c '^### proposal-' "$AUTO_FILE" || echo 0)
-  if [ "$AUTO_BLOCKS" -gt 10 ]; then
+  # grep -c prints 0 itself on no match (and exits 1): `|| echo 0` gave "0\n0".
+  AUTO_BLOCKS=$(grep -c '^### proposal-' "$AUTO_FILE" || true)
+  if [ "${AUTO_BLOCKS:-0}" -gt 10 ]; then
     echo "WARNING: auto bucket has $AUTO_BLOCKS proposals, cap=10 — keeping first 10"
     awk '/^### proposal-/{c++} c<=10' "$AUTO_FILE" > "$AUTO_FILE.cap"
     mv "$AUTO_FILE.cap" "$AUTO_FILE"
