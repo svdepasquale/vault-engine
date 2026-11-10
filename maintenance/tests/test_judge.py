@@ -7,7 +7,7 @@ LINT_DIR before the call.
 Run: <engine>/maintenance/run-tests.sh
 """
 from __future__ import annotations
-import importlib.util, json, sys
+import importlib.util, sys
 from pathlib import Path
 
 import pytest

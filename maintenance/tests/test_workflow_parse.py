@@ -27,7 +27,7 @@ def test_scripts_found():
 @pytest.mark.parametrize("script", SCRIPTS, ids=lambda p: p.name)
 def test_workflow_script_parses(script):
     r = subprocess.run([NODE, "-e", CHECK, str(script)],
-                       capture_output=True, text=True)
+                       capture_output=True, text=True, check=False)
     assert r.returncode == 0, r.stderr
 
 
@@ -35,5 +35,5 @@ def test_workflow_script_parses(script):
 def test_check_catches_unescaped_backtick(tmp_path):
     bad = tmp_path / "bad.workflow.js"
     bad.write_text("export const meta = {}\nconst x = `a `b` c`\n")
-    r = subprocess.run([NODE, "-e", CHECK, str(bad)], capture_output=True, text=True)
+    r = subprocess.run([NODE, "-e", CHECK, str(bad)], capture_output=True, text=True, check=False)
     assert r.returncode != 0 and "SyntaxError" in r.stderr

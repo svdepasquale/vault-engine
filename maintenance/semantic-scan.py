@@ -243,7 +243,7 @@ def main():
     if args.dump:
         return dump(pairs, args.pairs, Path(args.dump))
     if args.dry:
-        for s, pa, da, pb, db in pairs:
+        for s, pa, _da, pb, _db in pairs:
             print(f"{s:.3f}  {pa}  <>  {pb}")
         return 0
     why = _guard.check(API)

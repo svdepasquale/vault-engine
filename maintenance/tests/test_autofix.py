@@ -56,7 +56,7 @@ def test_adds_type_from_path_source(autofix_module):
     mod, vault = autofix_module
     f = vault / "sources/bar.md"
     write(f, "---\nname: Bar\n---\nbody\n")
-    added = mod.fix_page(f)
+    assert "type" in mod.fix_page(f)
     assert "type: source" in f.read_text()
 
 

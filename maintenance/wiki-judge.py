@@ -173,7 +173,7 @@ def judge(prop: dict, lint_targets: set[str]) -> tuple[str, str]:
         return ("defer", "action block missing or unparseable")
 
     # Reject if any field already exists with a non-empty value
-    for k, v in action.items():
+    for k in action:
         if k in fm and fm[k] not in (None, "", [], {}):
             return ("defer", f"field '{k}' already populated in target")
 
