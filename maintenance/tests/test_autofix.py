@@ -154,3 +154,23 @@ def test_post_write_yaml_parses(autofix_module):
     assert parsed["name"] == "Foo"
     assert parsed["type"] == "entity"
     assert parsed["tags"] == []
+
+
+def test_long_derived_name_stays_on_one_line(autofix_module):
+    """PyYAML folds plain scalars at 80 columns by default; a folded `name:`
+    is read truncated by the line readers and rejected by fm-validate."""
+    mod, vault = autofix_module
+    title = ("Operational runbook for rotating the signing keys of every service "
+             "and restarting the dependent workers afterwards")
+    assert len(title) > 100
+    f = vault / "entities/long-title.md"
+    write(f, f"---\ntitle: {title}\n---\nbody\n")
+    assert "name" in mod.fix_page(f)
+    text = f.read_text()
+    assert f"name: {title}\n" in text
+
+    spec = importlib.util.spec_from_file_location(
+        "fm_validate", SCRIPT.parent / "fm-validate.py")
+    fmv = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(fmv)
+    assert fmv.check_text(text, "entities/long-title.md") == []

@@ -125,7 +125,8 @@ def fix_page(path: Path) -> list[str]:
     # through yaml.dump on the existing block — that would lose comments,
     # ordering, and anchor styles users hand-author).
     insert_block = yaml.safe_dump(
-        dict(additions), sort_keys=False, allow_unicode=True, default_flow_style=False
+        dict(additions), sort_keys=False, allow_unicode=True, default_flow_style=False,
+        width=float("inf"),  # one line per value: the line readers stop at the newline
     ).rstrip("\n")
     new_fm = insert_block + "\n" + fm_text
     new_text = m.group(1) + new_fm + m.group(3) + text[m.end():]
