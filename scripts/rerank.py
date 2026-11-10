@@ -160,8 +160,6 @@ def prefix_scheme(model):
     return PREFIX_SCHEMES[family]
 
 
-MODEL_FAMILY = model_family(MODELS[0])
-
 # --- Local backend (2026-09-26) ---------------------------------------------
 # LM Studio stays closed by default (user decision 2026-08-29: no resident
 # daemon, it costs RAM), which left daily retrieval BM25-only: 6 hybrid vs 27
@@ -336,7 +334,6 @@ EXIT_OK = 0
 EXIT_USAGE = 2
 EXIT_CANDIDATES = 3
 EXIT_NO_BACKEND = 10
-EXIT_NO_MODEL = 11
 
 
 def log(msg):

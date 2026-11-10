@@ -55,6 +55,8 @@ When referring to level in frontmatter, use `batch_exponent: k` (not `level: k`)
 
 ## Concurrency (v1.7+)
 
+> `scripts/wiki-lock.sh` has since been removed from the engine: nothing used it once this skill retired. The block below is the record of how commit mode ran.
+
 The fold-page write in commit mode MUST be preceded by `wiki-lock acquire`:
 
 ```bash
