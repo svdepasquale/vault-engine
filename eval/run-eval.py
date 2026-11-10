@@ -24,8 +24,9 @@ Uses the same local embedding backend as retrieve.py (Homebrew llama-embedding
 on the GGUFs, or the HTTP backend named by WIKI_EMBED_URL); without it the rerank
 silently falls back to BM25 order, so the script warns rather than reporting
 numbers that look comparable but aren't. A partially-available fused config
-degrades to the surviving model and still reports numbers — check stderr, not
-just this summary.
+degrades to the surviving model and still reports numbers; the run then prints
+a WARN with retrieve's "not available" line, and the strategy line names the
+models that actually ranked.
 
 Provenance: every run prints the gold set's SHA-256 (first 12 hex), the vault
 HEAD (+dirty when tracked files differ from it), a content hash of the BM25
@@ -181,6 +182,8 @@ misses = []
 rows = []  # per query, for --save / --compare
 ku = []  # (q, labels) for knowledge-update items
 degraded = False
+partial = set()     # retrieve's "model(s) X not available" lines: a fused config lost a model
+strategies = set()
 t0 = time.time()
 
 for item in gold:
@@ -194,6 +197,8 @@ for item in gold:
     d = json.loads(out.stdout)
     if "noop" in d.get("strategy", ""):
         degraded = True
+    strategies.add(d.get("strategy", "unknown"))
+    partial.update(ln.strip() for ln in out.stderr.splitlines() if "not available" in ln)
     cands = d["candidates"]
     pages = [c["page"] for c in cands]
     chars += sum(len(c.get("text", "")) for c in cands)
@@ -222,8 +227,15 @@ if _index_sha() != INDEX_SHA:
 if degraded:
     print("WARN: rerank fell back to no-op (no embedding backend) "
           "— these numbers are BM25-only and not comparable to the baseline.\n")
+if partial:
+    print("WARN: the rerank ran without a configured model — these numbers are not "
+          "the configured fusion:")
+    for line in sorted(partial):
+        print(f"  {line}")
+    print()
 print(f"retrieve.py --top {TOP}   gold={GOLD.name} sha256:{GOLD_SHA}   n={n}   vault={HEAD}   "
       f"index={INDEX_SHA}   engine={ENGINE_HEAD}")
+print(f"  strategy={', '.join(sorted(strategies)) or 'none'}")
 print(f"  R@1={r1/n:.2f}  R@3={r3/n:.2f}  R@{TOP}={rk/n:.2f}  MRR={mrr/n:.3f}")
 print(f"  avg_chars={chars/n:.0f} (~{chars/n/4:.0f} tokens)  "
       f"avg_distinct_pages={pages_total/n:.2f}")
