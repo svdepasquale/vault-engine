@@ -31,10 +31,11 @@ mkdir -p "$LINT_DIR"
 exec >>"$LOG" 2>&1
 echo "=== $(date -Iseconds) start ==="
 
-# Failure notification: any non-zero exit fires a macOS notification
-# with the failing line. Without this, weekly launchd runs that fail
-# silently (script crash, ollama down, jq syntax error in a future
-# edit) would only show up if you happened to read the log file.
+# Failure notification: any non-zero exit fires a macOS notification.
+# All output goes to the log, so without it a failed run (script crash,
+# backend down, jq syntax error in a future edit) would only show up if you
+# happened to read the log file. The ERR trap covers failing commands; an
+# explicit abort must go through die(), since `exit 1` does not fire ERR.
 on_error() {
   local exit_code=$?
   local line=${1:-?}
@@ -43,6 +44,11 @@ on_error() {
   exit "$exit_code"
 }
 trap 'on_error $LINENO' ERR
+die() {
+  echo "ERROR: $1"
+  osascript -e "display notification \"$1 — see ~/Library/Logs/wiki-maintenance.log\" with title \"Wiki Maintenance FAILED\" sound name \"Basso\"" 2>/dev/null || true
+  exit 1
+}
 
 # 0. local-patch sentinel. Vault retrieval scripts are a vendored fork of
 #    the claude-obsidian plugin scripts (local patches v1.7.3/v1.7.4/v1.7.5 —
@@ -93,8 +99,7 @@ EVO_URL="${WIKI_LINT_EVO_URL:-}"   # e.g. http://<llm-box>:8080; required with W
 EVO_MODEL="${WIKI_LINT_EVO_MODEL:-Qwen3.8-Flash-Next}"
 BACKEND="${WIKI_LINT_BACKEND:-lmstudio}"
 if [ "$BACKEND" = "evo" ] && [ -z "$EVO_URL" ]; then
-  echo "ERROR: WIKI_LINT_BACKEND=evo needs WIKI_LINT_EVO_URL (e.g. http://<llm-box>:8080)."
-  exit 1
+  die "WIKI_LINT_BACKEND=evo needs WIKI_LINT_EVO_URL (e.g. http://<llm-box>:8080)."
 fi
 if [ "$BACKEND" = "evo" ]; then
   # Both checks required: /health goes green before/without a model loaded
@@ -103,9 +108,8 @@ if [ "$BACKEND" = "evo" ]; then
      && curl -fsS --max-time 5 "$EVO_URL/v1/models" 2>/dev/null | grep -q "\"$EVO_MODEL\""; then
     MODEL="$EVO_MODEL"; API_URL="$EVO_URL"
   else
-    echo "ERROR: WIKI_LINT_BACKEND=evo but $EVO_URL is not serving $EVO_MODEL."
     echo "  Power on the box and set WIKI_LINT_EVO_URL, or unset WIKI_LINT_BACKEND to use local LM Studio."
-    exit 1
+    die "WIKI_LINT_BACKEND=evo but $EVO_URL is not serving $EVO_MODEL."
   fi
 else
   API_URL="$LMS_URL"
@@ -113,7 +117,7 @@ fi
 echo "backend=$BACKEND model=$MODEL"
 # Lint findings and page text go to that URL: same rule as every script that
 # POSTs vault text (this machine, the LAN or the tailnet; scripts/endpoint-guard.py).
-python3 "$ENGINE_ROOT/scripts/endpoint-guard.py" "$API_URL" || exit 1
+python3 "$ENGINE_ROOT/scripts/endpoint-guard.py" "$API_URL" || die "endpoint-guard refused $API_URL"
 
 # llm_generate <prompt-file> <max-tokens> <out-file>
 # Backend-agnostic single-shot generation: writes the raw model text to
@@ -170,7 +174,7 @@ if [ "$BACKEND" = "lmstudio" ] && ! backend_ready; then
     sleep 1
     backend_ready && break
   done
-  backend_ready || { echo "LM Studio still unreachable after 30s, aborting"; exit 1; }
+  backend_ready || die "LM Studio still unreachable after 30s, aborting"
 fi
 
 # 1b. inference smoke test. Reachability alone proves nothing: the
