@@ -253,3 +253,42 @@ def test_parse_unparseable_returns_none(judge_module):
     parsed = mod.parse_proposal_block(block)
     # YAML actually accepts this as nested dict — verify it's a dict OR None
     assert parsed["action"] is None or isinstance(parsed["action"], dict)
+
+
+def test_parse_header_ignores_fenced_action_lines(judge_module):
+    """A `type:` / `target:` inside the action YAML must not overwrite the
+    proposal header: adding a missing type is the rubric's plain auto case."""
+    mod, vault = judge_module
+    write_page(vault, "entities/foo.md", {"name": "Foo"}, "x" * 250)
+    block = (
+        "type: update-frontmatter\n"
+        "target: entities/foo.md\n"
+        "finding: frontmatter_missing\n"
+        "action:\n"
+        "```yaml\n"
+        "type: entity\n"
+        "```\n"
+    )
+    parsed = mod.parse_proposal_block(block)
+    assert parsed["type"] == "update-frontmatter"
+    assert mod.judge(parsed, lint_targets={"entities/foo.md"})[0] == "auto"
+
+
+def test_parse_header_unclosed_fence_and_reverse_case(judge_module):
+    """A review proposal whose action says `type: mark-evergreen` stays a
+    review (defer), even when the model leaves the fence unclosed."""
+    mod, vault = judge_module
+    write_page(vault, "meta/notes.md", {"name": "Notes"}, "x" * 250)
+    block = (
+        "type: review\n"
+        "target: meta/notes.md\n"
+        "action:\n"
+        "```yaml\n"
+        "type: mark-evergreen\n"
+        "target: entities/other.md\n"
+        "status: archived\n"
+    )
+    parsed = mod.parse_proposal_block(block)
+    assert parsed["type"] == "review"
+    assert parsed["target"] == "meta/notes.md"
+    assert mod.judge(parsed, lint_targets={"meta/notes.md"})[0] == "defer"

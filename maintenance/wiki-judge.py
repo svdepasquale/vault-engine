@@ -75,10 +75,13 @@ def read_target(rel_path: str) -> tuple[dict, str] | None:
 def parse_proposal_block(body: str) -> dict:
     """Parse fields like 'type: foo' and the action YAML block."""
     out: dict = {"raw": body}
-    for line in body.splitlines():
+    # Header fields come only from the text before the first fence (the
+    # action YAML often holds its own `type:`/`target:` lines; cutting at the
+    # first fence also covers an unclosed one), and the first match wins.
+    for line in body.split("```", 1)[0].splitlines():
         m = re.match(r"^([a-z_]+):\s*(.*)$", line)
         if m and m.group(1) in {"type", "target", "finding", "rationale"}:
-            out[m.group(1)] = m.group(2).strip()
+            out.setdefault(m.group(1), m.group(2).strip())
     am = ACTION_BLOCK_RE.search(body)
     if am:
         block = am.group(1)
