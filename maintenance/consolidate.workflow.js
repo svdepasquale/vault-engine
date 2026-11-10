@@ -131,21 +131,30 @@ For each finding, check it against OLD (and any page it cites). If it is correct
 }
 
 phase('Draft')
+// A dead agent (quota, API error) returns null: the unit becomes an error entry
+// that the later stages pass through, so the other units' results survive and
+// the caller sees which unit to resume.
 const results = await pipeline(
   args.units,
-  (u) => agent(draftPrompt(u), { label: `draft:${u.id}`, phase: 'Draft', schema: DRAFT_SCHEMA }),
-  (d, u) => agent(verifyPrompt(u, d), { label: `verify:${u.id}`, phase: 'Verify', schema: VERIFY_SCHEMA, model: 'sonnet', effort: 'high' })
-    .then(v => ({ d, v })),
-  ({ d, v }, u) => {
+  (u) => agent(draftPrompt(u), { label: `draft:${u.id}`, phase: 'Draft', schema: DRAFT_SCHEMA })
+    .then(d => d || { unit: u.id, error: 'draft' }),
+  (d, u) => d.error ? d : agent(verifyPrompt(u, d), { label: `verify:${u.id}`, phase: 'Verify', schema: VERIFY_SCHEMA, model: 'sonnet', effort: 'high' })
+    .then(v => (v ? { d, v } : { unit: u.id, error: 'verify' })),
+  (x, u) => {
+    if (x.error) return x
+    const { d, v } = x
     if (!v.findings.length) {
       return { unit: u.id, draft: d, verify: v, revise: { applied: 0, rejected: [], final_drafts: d.drafts, notes: 'no findings' } }
     }
     return agent(revisePrompt(u, d, v), { label: `revise:${u.id}`, phase: 'Revise', schema: REVISE_SCHEMA, effort: 'high' })
-      .then(r => ({ unit: u.id, draft: d, verify: v, revise: r }))
+      .then(r => (r ? { unit: u.id, draft: d, verify: v, revise: r } : { unit: u.id, error: 'revise' }))
   },
 )
-const done = results.filter(Boolean)
+const all = results.map((r, i) => r || { unit: args.units[i].id, error: 'stage threw' })
+const done = all.filter(r => !r.error)
+const errored = all.filter(r => r.error)
 log(`${done.length}/${args.units.length} units finished`)
+if (errored.length) log(`unfinished units (resume to re-run them): ${errored.map(r => `${r.unit} (${r.error})`).join(', ')}`)
 return done.map(r => ({
   unit: r.unit,
   drafts: r.revise.final_drafts,
@@ -156,4 +165,4 @@ return done.map(r => ({
   applied: r.revise.applied,
   rejected: r.revise.rejected,
   notes: [r.draft.notes, r.revise.notes].filter(Boolean).join(' | '),
-}))
+})).concat(errored.map(r => ({ unit: r.unit, error: r.error })))
