@@ -142,7 +142,7 @@ def import_sibling(name, filename):
     target = SCRIPTS_DIR / filename
     if not target.is_file():
         log(f"ERR: sibling helper {filename} not found at {target}")
-        log("  Run `bash bin/setup-retrieve.sh --check` to verify the install.")
+        log("  The engine checkout is incomplete: check `git status` in the engine repo.")
         sys.exit(EXIT_NOT_PROVISIONED)
     try:
         spec = importlib.util.spec_from_file_location(name, target)
@@ -213,9 +213,10 @@ def main():
                              "the query.")
     parser.add_argument("--explain", action="store_true",
                         help="Include per-stage diagnostics in output")
-    parser.add_argument("--allow-remote-ollama", action="store_true",
-                        help="Forwarded to rerank.py as --allow-remote-backend: accept a "
-                             "WIKI_EMBED_URL on a public address")
+    parser.add_argument("--allow-remote-backend", "--allow-remote-ollama",
+                        dest="allow_remote_backend", action="store_true",
+                        help="Forwarded to rerank.py: accept a WIKI_EMBED_URL on a public "
+                             "address (--allow-remote-ollama is a deprecated alias)")
     parser.add_argument("--scores", action="store_true",
                         help="With --compact, also emit bm25 and the raw per-model "
                              "cosines (absolute relevance signal for recall.py)")
@@ -224,8 +225,9 @@ def main():
         args.query = sys.stdin.read().strip()
 
     if not BM25_INDEX.is_file():
-        log(f"ERR: no BM25 index at {BM25_INDEX}. Run `bash bin/setup-retrieve.sh` "
-            "to provision, or fall back to legacy hot→index→drill.")
+        log(f"ERR: no BM25 index at {BM25_INDEX}. Build it with "
+            "`python3 scripts/contextual-prefix.py --all && python3 scripts/bm25-index.py build`, "
+            "or fall back to legacy hot→index→drill.")
         return EXIT_NOT_PROVISIONED
     if not CHUNKS_DIR.is_dir() or not any(CHUNKS_DIR.iterdir()):
         log(f"ERR: no chunks at {CHUNKS_DIR}. Run "
@@ -265,7 +267,7 @@ def main():
         fill = max(0, args.bm25_top - len(candidates)) if args.dense_fill else 0
         final = reranker.rerank(
             args.query, candidates, top_k=None,  # the fill may add candidates; all go on
-            allow_remote=args.allow_remote_ollama,
+            allow_remote=args.allow_remote_backend,
             dense_pool={cid: d for cid, d in index["docs"].items() if d.get("input_hash")},
             dense_k=fill,
             make_candidate=lambda cid, path: build_candidate(cid, path, 0.0),

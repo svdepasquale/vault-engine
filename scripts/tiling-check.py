@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """tiling-check.py — DragonScale Mechanism 3: semantic tiling lint.
 
-Computes per-page embeddings via a local ollama instance and reports
+Computes per-page embeddings via the embedding backend's OpenAI-compatible
+API (WIKI_EMBED_URL, LM Studio by default) and reports
 candidate duplicate page pairs. Read-only; never modifies wiki pages.
 
 Security model:
@@ -11,8 +12,8 @@ Security model:
   otherwise exfiltrate content).
 - Rejects symlinked page files to prevent escape outside the vault root.
 
-Feature-gated: exits 10 if ollama is unreachable or 11 if the embedding
-model is not pulled, so the calling skill can no-op gracefully. Exits 0
+Feature-gated: exits 10 if the backend is unreachable or 11 if it does not
+serve the embedding model, so the calling skill can no-op gracefully. Exits 0
 on success. Exit 3 on cache corruption. Exit 2 on usage error.
 
 Concurrency:
@@ -20,7 +21,7 @@ Concurrency:
 - Per-PID temp file to avoid shared-tempfile races.
 
 Usage:
-  tiling-check.py                      # run; exit 10/11 if ollama/model missing
+  tiling-check.py                      # run; exit 10/11 if backend/model missing
   tiling-check.py --report PATH        # also write report to PATH
   tiling-check.py --rebuild-cache      # ignore cached embeddings
   tiling-check.py --peek               # structured diagnostics; no compute
@@ -294,10 +295,10 @@ def run_check(
     model: str,
 ) -> int:
     if not detect_backend(embed_url):
-        log(f"ollama not reachable at {embed_url}; skipping tiling check")
+        log(f"embedding backend not reachable at {embed_url}; skipping tiling check")
         return EXIT_NO_BACKEND
     if not detect_model(embed_url, model):
-        log(f"model '{model}' not pulled; run: ollama pull {model}")
+        log(f"model '{model}' not served by {embed_url}; load it in the backend (LM Studio)")
         return EXIT_NO_MODEL
 
     thresholds = load_thresholds()
@@ -320,7 +321,7 @@ def run_check(
             log(f"ERR: {scale_n} pages exceed hard-fail limit {SCALE_HARD_FAIL_PAGES}")
             return EXIT_SCALE_EXCEEDED
         if scale_n > SCALE_WARN_PAGES:
-            log(f"WARN: {scale_n} pages; cold-cache embed will issue ~{scale_n} POSTs to ollama")
+            log(f"WARN: {scale_n} pages; cold-cache embed will issue ~{scale_n} POSTs to the embedding backend")
 
         for md in candidates:
             scanned += 1

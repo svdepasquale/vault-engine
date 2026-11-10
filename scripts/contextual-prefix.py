@@ -27,7 +27,7 @@ Data-egress posture (v1.7.1+):
   Tiers 1 and 2 send wiki page bodies off-machine. Both are GATED behind
   --allow-egress (default off). Without the flag, pick_prefix_tier() always
   returns "synthetic" regardless of env vars or claude binary presence.
-  Mirror of scripts/tiling-check.py:351 --allow-remote-ollama precedent.
+  Mirror of the --allow-remote-backend guard in tiling-check.py and rerank.py.
 
 Chunk schema written to .vault-meta/chunks/<page-address>/chunk-NNN.json:
 {
@@ -205,7 +205,7 @@ def page_is_indexed(path):
 
 def derive_synthetic_address(page_path):
     """Stable per-path address-shaped string when no real address is set.
-    Format: c-NNNNNN derived from a hash of the relative path (deterministic).
+    Format: syn- plus 6 hex digits of a SHA-1 of the relative path (deterministic).
     Distinct from allocator addresses; used only for chunk filing.
     """
     rel = page_path.relative_to(VAULT_ROOT)
@@ -430,7 +430,7 @@ def pick_prefix_tier(force_synthetic, allow_egress=False):
     wiki page bodies off-machine, so they require explicit user consent via
     the --allow-egress flag at the CLI layer.
 
-    Mirrors scripts/tiling-check.py:351 --allow-remote-ollama default-deny.
+    Mirrors the --allow-remote-backend default-deny in tiling-check.py and rerank.py.
     """
     if force_synthetic or not allow_egress:
         return "synthetic"
@@ -647,7 +647,7 @@ def main():
                              "subprocess) prefix generation. Without this flag, page "
                              "bodies stay on-machine and only the tier-3 synthetic "
                              "prefix is used. Mirror of tiling-check.py's "
-                             "--allow-remote-ollama guard.")
+                             "--allow-remote-backend guard.")
     parser.add_argument("--rebuild", action="store_true",
                         help="Re-process chunks even if body_hash matches.")
     parser.add_argument("--peek", action="store_true",

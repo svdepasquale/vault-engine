@@ -44,8 +44,9 @@ Exit codes:
   0 — success
   2 — usage error
   3 — candidate input malformed
-  10 — backend unreachable (no-op rerank performed, exit 0 with note)
-  11 — model not pulled (no-op rerank performed, exit 0 with note)
+  10 — --embed-all only: no embedding backend available
+  A query with no backend, or without its model, falls back to a no-op rerank
+  (BM25 order) and still exits 0.
 """
 
 import argparse

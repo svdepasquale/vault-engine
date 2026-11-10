@@ -98,3 +98,13 @@ def test_no_rerank_fills_a_capped_slot_from_the_next_page(tmp_path):
                           "--chunks", "--compact"], env=env, check=True, capture_output=True, text=True)
     pages = [c["page"] for c in json.loads(out.stdout)["candidates"]]
     assert pages == ["wiki/things/long.md", "wiki/things/long.md", "wiki/things/short.md"]
+
+
+@pytest.mark.parametrize("flag", ["--allow-remote-backend", "--allow-remote-ollama"])
+def test_without_an_index_it_names_the_build_command(tmp_path, flag):
+    env = {**os.environ, "WIKI_VAULT": str(tmp_path / "vault")}
+    out = subprocess.run([sys.executable, str(SCRIPT), "anything", flag],
+                         env=env, capture_output=True, text=True, check=False)
+    assert out.returncode == 10                                  # the old flag still parses
+    assert "contextual-prefix.py --all && python3 scripts/bm25-index.py build" in out.stderr
+    assert "setup-retrieve" not in out.stderr
