@@ -39,12 +39,13 @@ LOG_PATH = VAULT_ROOT / ".git" / "wiki-recall.log"
 
 QWEN = "text-embedding-qwen3-embedding-0.6b"
 NOMIC = "text-embedding-nomic-embed-text-v1.5@f16"
-# Calibrated 2026-09-26 on eval/recall-gold.json (73 real prompts: 42 needing
-# a vault page, 19 not, 12 trivial): at 0.46 the right page is injected for 34
-# of 42 and 5 of 21 irrelevant/trivial prompts get a (mostly borderline)
-# pointer; precision 0.81. Numbers and the sweep: vault CLAUDE.md
-# §Per-prompt recall. Override for experiments only.
-THRESHOLD = float(os.environ.get("WIKI_RECALL_THRESHOLD", "0.46"))
+# Calibrated on eval/recall-gold.json (73 real prompts: 42 needing a vault
+# page, 19 not, 12 trivial). 0.46 from 2026-09-26 to 2026-11-10; 0.44 since,
+# the user's decision: on that day's index the right page is injected for 36
+# of 42 (35 at 0.46) with the same 3 wrong pages and the same 6 unwanted
+# pointers on irrelevant prompts. Numbers and the sweep: vault
+# CLAUDE.md §Per-prompt recall. Override for experiments only.
+THRESHOLD = float(os.environ.get("WIKI_RECALL_THRESHOLD", "0.44"))
 FEATURE = os.environ.get("WIKI_RECALL_FEATURE", "qwen")   # qwen | nomic | mean
 MAX_POINTERS = 2
 MAX_QUERY_CHARS = 600
