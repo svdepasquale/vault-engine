@@ -472,13 +472,28 @@ def generate_prefix(tier, fm, body, chunk_text):
 
 
 def process_page(page_path, force_synthetic=False, rebuild=False, peek=False,
-                 allow_egress=False, progress_label=""):
+                 allow_egress=False, progress_label="", claimed=None):
+    """Chunk one page. `claimed` (address -> page path, kept by an --all run)
+    catches two pages that carry the same `address:`: they would share one
+    chunk dir, and the page processed last would silently push the other out
+    of the index. The second one is filed under its synthetic address instead.
+    """
     body = read_page(page_path)
     fm, content = parse_frontmatter(body)
     # `title` is optional in the page schema. Without it every chunk's prefix
     # said "(untitled)"; the file name is what most pages carry as title anyway.
     fm["title"] = fm.get("title") or page_path.stem
     address = fm.get("address") or derive_synthetic_address(page_path)
+    rel_path = str(page_path.relative_to(VAULT_ROOT))
+    if claimed is not None:
+        owner = claimed.get(address)
+        if owner is not None and owner != rel_path:
+            synthetic = derive_synthetic_address(page_path)
+            log(f"ERR: {rel_path} has address {address}, already used by {owner}; "
+                f"filing its chunks under {synthetic}. Give one of the two pages a new "
+                f"address (scripts/allocate-address.sh).")
+            address = synthetic
+        claimed[address] = rel_path
     page_body_hash = sha256(body)
 
     chunk_dir = CHUNKS_DIR / address
@@ -519,7 +534,6 @@ def process_page(page_path, force_synthetic=False, rebuild=False, peek=False,
 
     log(f"{progress}-> {page_path.relative_to(VAULT_ROOT)}  address={address}  chunks={len(chunks)}  tier={tier}")
 
-    rel_path = str(page_path.relative_to(VAULT_ROOT))
     written = []
     skipped = 0
     # Keep this loop sequential. The tier-1 Anthropic path caches the page body;
@@ -673,6 +687,7 @@ def main():
     total_written = 0
     total_skipped = 0
     live_addresses = set()
+    claimed = {}
     for i, page in enumerate(files, 1):
         result = process_page(
             page,
@@ -681,6 +696,7 @@ def main():
             peek=args.peek,
             allow_egress=args.allow_egress,
             progress_label=f"[{i}/{total}]",
+            claimed=claimed,
         )
         total_written += len(result["written"])
         total_skipped += result["skipped"]

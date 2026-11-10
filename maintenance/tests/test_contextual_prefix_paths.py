@@ -63,3 +63,18 @@ def test_a_page_moved_without_an_edit_gets_its_new_path(monkeypatch, tmp_path):
     old.rename(new)
     assert run_all(monkeypatch, mod) == 0
     assert [r["page_path"] for r in chunk_records(mod)] == ["wiki/sources/alpha.md"]
+
+
+def test_two_pages_with_one_address_both_stay_indexed(monkeypatch, tmp_path, capsys):
+    vault = tmp_path / "vault"
+    write_page(vault, "wiki/things/beta.md", "name: beta\naddress: c-000002\ntype: entity", "Penguin colonies.")
+    write_page(vault, "wiki/things/gamma.md", "name: gamma\naddress: c-000002\ntype: entity", "Glacier tides.")
+    mod = load(monkeypatch, vault)
+    assert run_all(monkeypatch, mod) == 0                        # logged, not fatal: the rest keeps re-chunking
+    by_path = {r["page_path"]: r["page_address"] for r in chunk_records(mod)}
+    synthetic = mod.derive_synthetic_address(vault.resolve() / "wiki" / "things" / "gamma.md")
+    assert by_path == {"wiki/things/beta.md": "c-000002", "wiki/things/gamma.md": synthetic}
+    err = capsys.readouterr().err
+    assert "ERR: wiki/things/gamma.md has address c-000002, already used by wiki/things/beta.md" in err
+    assert run_all(monkeypatch, mod) == 0                        # a second run keeps both, GC included
+    assert {r["page_path"] for r in chunk_records(mod)} == {"wiki/things/beta.md", "wiki/things/gamma.md"}
