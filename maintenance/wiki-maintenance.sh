@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # On-demand wiki maintenance (run by hand: a laptop is asleep at any fixed
-# hour; maintenance/launchd/README.md). Runs deterministic
+# hour; maintenance/README.md). Runs deterministic
 # lint, then asks an LLM to draft conservative fix proposals: local LM
 # Studio with qwen/qwen3.8-27b by default (since 2026-08-27), a remote
 # llama-server (Qwen3.8-Flash-Next) only with WIKI_LINT_BACKEND=evo + WIKI_LINT_EVO_URL, and no fallback

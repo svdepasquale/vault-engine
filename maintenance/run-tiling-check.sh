@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Wrapper for DragonScale tiling-check.py (on demand; maintenance/launchd/README.md).
+# Wrapper for DragonScale tiling-check.py (on demand; maintenance/README.md).
 # Code lives in vault-engine, the data in the vault (WIKI_VAULT, split 2026-10-06).
 set -euo pipefail
 

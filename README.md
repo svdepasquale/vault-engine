@@ -17,6 +17,7 @@ python3 scripts/contextual-prefix.py --all && python3 scripts/bm25-index.py buil
 python3 scripts/retrieve.py "your question" --top 3 --chunks --compact               # hybrid retrieval
 python3 eval/run-eval.py --gold goldset.json                                          # gate against the vault's gold set
 bash maintenance/run-tests.sh                                                         # tests (pytest via uv)
+bash maintenance/wiki-maintenance.sh                                                  # maintenance round, on demand (no timer)
 ```
 
 Embeddings run locally through Homebrew `llama-embedding` on GGUF models; without it, retrieval degrades to BM25 order and says so in its output. Any script that sends vault text over HTTP (an embedding server, the local judge and dream models) accepts only hosts on this machine, the LAN or a tailnet; a public address needs `WIKI_ALLOW_PUBLIC_ENDPOINTS=1`.

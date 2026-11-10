@@ -1,6 +1,7 @@
 # On-demand jobs
 
-These two are deliberately **not** installed as timers.
+These two are deliberately **not** installed as timers, and the repo ships no
+launchd job for them.
 
 `wiki-maintenance` and `dragonscale-tiling` used to run on a Sunday-03:00 timer on
 an always-on machine. On a laptop that timer is close to useless — the machine is
@@ -19,5 +20,3 @@ nags inside the Claude session when the last completion marker gets old.
 
 A scheduled job is not a verified job: keep the tripwire even if a timer comes
 back, because it also catches a job that runs on schedule and *fails*.
-
-The plists here use `__HOME__` as a placeholder; render it before loading one.
