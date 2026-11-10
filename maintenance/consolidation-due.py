@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """consolidation-due.py — which pages have grown into journals (vault CLAUDE.md §Consolidate).
 
-Deterministic and cheap: no model, file reads plus two git calls per page that
-carries `consolidated:`. The SessionEnd worker (dotfiles wiki-autocommit.sh)
+Deterministic and cheap: no model, file reads plus two or three git calls per
+page that carries `consolidated:`. The SessionEnd worker (dotfiles wiki-autocommit.sh)
 runs it after the index refresh and writes the result to
 .git/wiki-consolidate.due, which the SessionStart hook turns into one short
 section. Empty file = nothing due.
@@ -31,7 +31,6 @@ import os
 import re
 import subprocess
 import sys
-from datetime import date
 from pathlib import Path
 
 # Data and code are separate repos since 2026-10-06: this file belongs to vault-engine,
@@ -55,14 +54,23 @@ def field(fm, name):
 
 
 def size_at(rel, day):
-    """Byte size of the page at the last commit on or before `day` (0 if none)."""
-    rev = subprocess.run(["git", "-C", str(VAULT), "rev-list", "-1", f"--before={day} 23:59:59", "HEAD"],
-                         capture_output=True, text=True).stdout.strip()
+    """Body size in bytes of the page as consolidated: at the commit that wrote
+    its current `consolidated: <day>` line, which can land the day after <day>
+    (fallback: the last commit on or before <day>; 0 if none)."""
+    git = ["git", "-C", str(VAULT)]
+    rev = subprocess.run(git + ["log", "-1", "--format=%H", f"-G^consolidated:.*{day}", "HEAD", "--", rel],
+                         capture_output=True, text=True, check=False).stdout.strip()
+    if not rev:
+        rev = subprocess.run(git + ["rev-list", "-1", f"--before={day} 23:59:59", "HEAD"],
+                             capture_output=True, text=True, check=False).stdout.strip()
     if not rev:
         return 0
-    out = subprocess.run(["git", "-C", str(VAULT), "cat-file", "-s", f"{rev}:{rel}"],
-                         capture_output=True, text=True).stdout.strip()
-    return int(out) if out.isdigit() else 0
+    r = subprocess.run(git + ["show", f"{rev}:{rel}"], capture_output=True, check=False)
+    if r.returncode:
+        return 0
+    text = r.stdout.decode("utf-8", errors="replace")
+    m = FM_RE.match(text)
+    return len((text[m.end():] if m else text).encode())
 
 
 def scan():
