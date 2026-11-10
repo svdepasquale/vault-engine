@@ -69,6 +69,17 @@ def test_a_real_link_next_to_code_still_counts(lint_module, tmp_path, monkeypatc
     assert [f["target"] for f in findings if f["type"] == "dead_link"] == ["missing"]
 
 
+def test_escaped_table_pipe_and_indented_fence(lint_module, tmp_path, monkeypatch):
+    # In a table the alias pipe is written `\|`, and a fence inside a list item
+    # is indented: neither may turn into a dead link (or orphan b).
+    body = ("| page | note |\n|---|---|\n| [[b\\|the b page]] | x |\n\n"
+            "- step one:\n\n  ```bash\n  if [[ -f /tmp/x ]]; then echo y; fi\n  ```\n")
+    write(tmp_path / "entities/a.md", PAGE.format(n="a", body=body))
+    write(tmp_path / "entities/b.md", PAGE.format(n="b", body="back to [[a]]"))
+    findings = run(lint_module, monkeypatch)
+    assert [f for f in findings if f["type"] in ("dead_link", "orphan")] == []
+
+
 def graph_page(n: str, typ: str = "entity", fm: str = "") -> str:
     return f"---\nname: {n}\ndescription: d\ntype: {typ}\n{fm}---\nbody\n"
 

@@ -36,7 +36,8 @@ FRONTMATTER = re.compile(r"^---\n(.*?)\n---", re.DOTALL)
 # Code is not a link: a page that quotes the syntax (`[[x]]`, a bare `[[`) or
 # shows it in a fenced block must not report a dead link, and a bare `[[` must
 # not open a match that runs on and swallows the next real link.
-FENCED = re.compile(r"^(```|~~~).*?^\1[^\n]*$", re.DOTALL | re.MULTILINE)
+# A fence may be indented (inside a list item).
+FENCED = re.compile(r"^[ \t]*(```|~~~).*?^[ \t]*\1[^\n]*$", re.DOTALL | re.MULTILINE)
 INLINE_CODE = re.compile(r"(`+)[^\n]*?(?<!`)\1(?!`)")
 
 
@@ -161,7 +162,8 @@ def main(brief: bool = False, only: set[str] | None = None):
         by_slug.setdefault(slug(p), []).append(p)
         body = strip_code(FRONTMATTER.sub("", text, count=1))
         for m in WIKILINK.finditer(body):
-            tgt = m.group(1).strip()
+            # In a table row the alias pipe is escaped: [[b\|alias]] links b.
+            tgt = m.group(1).strip().rstrip("\\").strip()
             targets.setdefault(tgt, set()).add(p)
 
     findings = []
