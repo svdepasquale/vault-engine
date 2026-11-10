@@ -217,11 +217,13 @@ AUTOFIX_COUNT=$(jq '.fixed_count' "$AUTOFIX_REPORT")
 echo "autofix_count=$AUTOFIX_COUNT"
 if [ "$AUTOFIX_COUNT" -gt 0 ]; then
   SUMMARY=$(jq -r '.fixed | map((.path | sub("\\.md$"; "")) + " (" + (.fields | join(",")) + ")") | join("; ")' "$AUTOFIX_REPORT")
-  # Paths are relative to wiki/ and kebab-case (no spaces). Push is left to
-  # step 6 or to wiki-autocommit.sh, which pushes any commit ahead of origin.
-  if jq -r '.fixed[].path' "$AUTOFIX_REPORT" | sed 's|^|wiki/|' \
-       | (cd "$VAULT_ROOT" && xargs git add --) \
-     && git -C "$VAULT_ROOT" commit -q -m "wiki-autofix: $AUTOFIX_COUNT frontmatter fix(es)" -m "$SUMMARY"; then
+  # Paths are relative to wiki/. The commit names them, so it never takes
+  # what another session has staged. Push is left to step 6 or to
+  # wiki-autocommit.sh, which pushes any commit ahead of origin.
+  FIXED_PATHS=()
+  while IFS= read -r p; do FIXED_PATHS+=("wiki/$p"); done < <(jq -r '.fixed[].path' "$AUTOFIX_REPORT")
+  if git -C "$VAULT_ROOT" add -- "${FIXED_PATHS[@]}" \
+     && git -C "$VAULT_ROOT" commit -q -m "wiki-autofix: $AUTOFIX_COUNT frontmatter fix(es)" -m "$SUMMARY" -- "${FIXED_PATHS[@]}"; then
     echo "git: autofix committed"
   else
     echo "git: autofix commit failed (non-fatal; SessionEnd auto-commit will sweep it)"
