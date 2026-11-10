@@ -84,8 +84,12 @@ META_DIR = VAULT_ROOT / ".vault-meta"
 CHUNKS_DIR = META_DIR / "chunks"
 
 CHUNK_TARGET_TOKENS = 500  # rough; we approximate via chars/4
-CHUNK_TARGET_CHARS = CHUNK_TARGET_TOKENS * 4
-CHUNK_OVERLAP_CHARS = 200
+# Both sizes can be set from the environment for an experiment on the gate.
+CHUNK_TARGET_CHARS = int(os.environ.get("WIKI_CHUNK_TARGET_CHARS") or CHUNK_TARGET_TOKENS * 4)
+CHUNK_OVERLAP_CHARS = int(os.environ.get("WIKI_CHUNK_OVERLAP_CHARS") or 200)
+# What frames the page in the synthetic prefix: its opening sentence, its
+# frontmatter `description`, or both (experiment switch).
+PREFIX_FRAME = os.environ.get("WIKI_PREFIX_FRAME", "opening")
 
 # Pages excluded from --all indexing (explicit single-path runs bypass this).
 # log.md: append-only operation log — mentions every topic, so it BM25-matches
@@ -122,6 +126,7 @@ EXIT_CHUNK_DIR = 4
 FRONTMATTER_RE = re.compile(r"^---\n(.*?)\n---\n", re.DOTALL)
 ADDRESS_RE = re.compile(r"^address:\s*(c-\d{6})\s*$", re.MULTILINE)
 TITLE_RE = re.compile(r"^title:\s*['\"]?(.+?)['\"]?\s*$", re.MULTILINE)
+DESCRIPTION_RE = re.compile(r"^description:\s*['\"]?(.+?)['\"]?\s*$", re.MULTILINE)
 STATUS_RE = re.compile(r"^status:\s*['\"]?([\w-]+)['\"]?\s*$", re.MULTILINE)
 # `index: false` opts a page out of --all indexing (2026-09-04): for archived /
 # superseded pages that are not the canonical answer to anything, so they stop
@@ -174,12 +179,14 @@ def parse_frontmatter(body):
     rest = body[m.end():]
     addr_m = ADDRESS_RE.search(fm_text)
     title_m = TITLE_RE.search(fm_text)
+    desc_m = DESCRIPTION_RE.search(fm_text)
     status_m = STATUS_RE.search(fm_text)
     repl_m = REPLACED_BY_RE.search(fm_text)
     replaced_by = WIKILINK_RE.findall(repl_m.group(1)) if repl_m else []
     return {
         "address": addr_m.group(1) if addr_m else None,
         "title": title_m.group(1) if title_m else None,
+        "description": desc_m.group(1) if desc_m else None,
         "status": status_m.group(1) if status_m else None,
         "replaced_by": replaced_by,
         "indexed": not INDEX_FLAG_RE.search(fm_text),
@@ -263,9 +270,11 @@ def chunk_body(body, target_chars=CHUNK_TARGET_CHARS, overlap=CHUNK_OVERLAP_CHAR
     chunks = []
     cur = []
     cur_len = 0
+    fresh = False   # cur holds text of its own, not only the previous chunk's tail
     for p in paragraphs:
         cur.append(p)
         cur_len += len(p) + 2
+        fresh = True
         if cur_len >= target_chars:
             chunk_text = "\n\n".join(cur)
             chunks.append(chunk_text)
@@ -273,7 +282,11 @@ def chunk_body(body, target_chars=CHUNK_TARGET_CHARS, overlap=CHUNK_OVERLAP_CHAR
             tail = clean_overlap_tail(chunk_text, overlap)
             cur = [tail] if tail else []
             cur_len = len(tail)
-    if cur and "".join(cur).strip():
+            fresh = False
+    # A page whose last paragraph closed a chunk leaves only the overlap seed
+    # behind: emitting it made a final chunk of ~200 characters that repeated
+    # the end of the one before and could take a result slot (2026-11-10).
+    if cur and fresh and "".join(cur).strip():
         chunks.append("\n\n".join(cur))
     if not chunks and body.strip():
         # tiny page — single chunk
@@ -290,7 +303,13 @@ def synthetic_prefix(fm, body, chunk_text):
     # First sentence of the body (not the chunk — gives the chunk a page-level frame)
     first_sentence = re.split(r"(?<=[.!?])\s+", strip_struck(body).strip(), maxsplit=1)
     first = first_sentence[0][:300] if first_sentence else ""
-    prefix = f"This passage is from the wiki page \"{title}\". The page opens: {first}"
+    desc = re.sub(r"\s+", " ", fm.get("description") or "").strip()[:400]
+    if PREFIX_FRAME == "description" and desc:
+        prefix = f"This passage is from the wiki page \"{title}\". The page is about: {desc}"
+    elif PREFIX_FRAME == "both" and desc:
+        prefix = f"This passage is from the wiki page \"{title}\". The page is about: {desc} The page opens: {first}"
+    else:
+        prefix = f"This passage is from the wiki page \"{title}\". The page opens: {first}"
     # Status-aware tail (2026-09-04): a stale page that stays indexed because it
     # is still the canonical answer to something (a replaced tool, a retired machine) must say
     # so in every chunk, or a retrieved chunk reads as current fact. Bumping
