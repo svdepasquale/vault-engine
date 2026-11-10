@@ -54,7 +54,8 @@ defer reasons):
 - `update-frontmatter` adding `description` requires:
   length 40–120, no filler markers, target body >200 chars,
   no verbatim dup of title/name
-- `mark-evergreen` only on meta/index pages
+- `mark-evergreen` only on meta/index pages, with no action or an action
+  that is exactly `status: evergreen`
 - target must appear in lint findings (anti-hallucination)
 - target frontmatter must not already have a value for the field
 - `type` value must match path-derived default
