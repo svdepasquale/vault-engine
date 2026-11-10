@@ -208,10 +208,13 @@ def load_cache(current_model: str) -> dict:
 
 def save_cache(cache: dict) -> None:
     META_DIR.mkdir(exist_ok=True)
-    tmp = CACHE_PATH.with_name(f"{CACHE_PATH.stem}.{os.getpid()}.tmp")
-    with tmp.open("w") as f:
-        json.dump(cache, f, indent=2)
-    tmp.replace(CACHE_PATH)
+    tmp = CACHE_PATH.with_name(f"{CACHE_PATH.name}.tmp.{os.getpid()}")  # ignored as *.tmp.*
+    try:
+        with tmp.open("w") as f:
+            json.dump(cache, f, indent=2)
+        tmp.replace(CACHE_PATH)
+    finally:
+        tmp.unlink(missing_ok=True)
 
 
 def load_thresholds() -> dict:

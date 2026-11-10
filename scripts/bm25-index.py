@@ -269,7 +269,7 @@ def gc_embed_cache():
             return
         for k in dead:
             del cache[k]
-        tmp = EMBED_CACHE_PATH.with_suffix(f".{os.getpid()}.tmp")
+        tmp = EMBED_CACHE_PATH.with_name(f"{EMBED_CACHE_PATH.name}.tmp.{os.getpid()}")  # ignored as *.tmp.*
         try:
             tmp.write_text(json.dumps(cache, ensure_ascii=False), encoding="utf-8")
             os.replace(tmp, EMBED_CACHE_PATH)

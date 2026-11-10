@@ -3,6 +3,8 @@ from __future__ import annotations
 import importlib.util, json, stat
 from pathlib import Path
 
+import pytest
+
 SCRIPT = Path(__file__).resolve().parent.parent.parent / "scripts" / "rerank.py"
 
 # Stands in for llama-embedding: records its argv, scores each pair by the
@@ -137,3 +139,26 @@ def test_a_requested_cross_encoder_that_cannot_run_says_so(monkeypatch, tmp_path
     out = mod.rerank("q", [{"path": "a"}, {"path": "b"}], top_k=None)
     assert [c["path"] for c in out] == ["a", "b"]
     assert "WIKI_CE=fuse but the cross-encoder cannot run (no reranker GGUF" in capsys.readouterr().err
+
+
+def test_save_cache_leaves_nothing_the_vault_would_commit(monkeypatch, tmp_path):
+    mod, _ = load(monkeypatch, tmp_path, "off")
+
+    def contended(fd, op):
+        raise BlockingIOError
+
+    monkeypatch.setattr(mod.fcntl, "flock", contended)      # lock never free: the unlocked path
+    monkeypatch.setattr(mod.time, "sleep", lambda s: None)
+    seen = []
+
+    def failing_replace(src, dst):
+        seen.append(Path(src).name)
+        raise OSError("disk full")
+
+    monkeypatch.setattr(mod.os, "replace", failing_replace)
+    with pytest.raises(OSError):
+        mod.save_cache({"k": [0.1]})
+    meta = mod.META_DIR
+    assert seen and seen[0].startswith("embed-cache.json.tmp.")    # matches the vault's *.tmp.* rule
+    assert not list(meta.glob("*.tmp*"))                            # and is gone after a failed write
+    assert not (meta / "hook.log").exists()
