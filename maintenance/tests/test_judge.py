@@ -292,3 +292,46 @@ def test_parse_header_unclosed_fence_and_reverse_case(judge_module):
     assert parsed["type"] == "review"
     assert parsed["target"] == "meta/notes.md"
     assert mod.judge(parsed, lint_targets={"meta/notes.md"})[0] == "defer"
+
+
+def test_mark_evergreen_meta_with_extra_keys_defers(judge_module):
+    """On a meta page, mark-evergreen is auto only when its action sets
+    nothing but `status: evergreen`: any other key would be applied unseen."""
+    mod, vault = judge_module
+    write_page(vault, "meta/notes.md", {"name": "Notes", "description": "Old"}, "x" * 250)
+    block = (
+        "type: mark-evergreen\n"
+        "target: meta/notes.md\n"
+        "action:\n"
+        "```yaml\n"
+        "status: evergreen\n"
+        'description: "Replaced by the model"\n'
+        "```\n"
+    )
+    verdict, reason = mod.judge(mod.parse_proposal_block(block),
+                                lint_targets={"meta/notes.md"})
+    assert verdict == "defer" and "more than status" in reason
+
+
+@pytest.mark.parametrize("action", [
+    "",                                         # no action block at all
+    "action:\n```yaml\n```\n",                  # empty block
+    'action:\n```yaml\nstatus: "evergreen" # permanent record\n```\n',
+])
+def test_mark_evergreen_meta_plain_actions_apply(judge_module, action):
+    mod, vault = judge_module
+    write_page(vault, "meta/notes.md", {"name": "Notes"}, "x" * 250)
+    block = "type: mark-evergreen\ntarget: meta/notes.md\n" + action
+    verdict, _ = mod.judge(mod.parse_proposal_block(block),
+                           lint_targets={"meta/notes.md"})
+    assert verdict == "auto"
+
+
+def test_mark_evergreen_meta_unparseable_action_defers(judge_module):
+    mod, vault = judge_module
+    write_page(vault, "meta/notes.md", {"name": "Notes"}, "x" * 250)
+    block = ("type: mark-evergreen\ntarget: meta/notes.md\n"
+             "action:\n```yaml\n: : not yaml [\n```\n")
+    verdict, _ = mod.judge(mod.parse_proposal_block(block),
+                           lint_targets={"meta/notes.md"})
+    assert verdict == "defer"

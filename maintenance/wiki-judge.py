@@ -22,7 +22,8 @@ Rubric (high confidence):
     * no filler markers
     * target page body > 200 chars (real content)
     * value not equal to title or name verbatim
-- type=mark-evergreen on meta/index/_index/profile pages
+- type=mark-evergreen on meta/index/_index/profile pages, with no action
+  or an action that is exactly {status: evergreen}
 - target file exists, slug appears in lint report findings,
   proposed type ∈ allowed set
 
@@ -95,6 +96,9 @@ def parse_proposal_block(body: str) -> dict:
         block = re.sub(r"^\s*#[^\n]*\n", "", block)
         # 3. JSON-style wrapper around a single key (e.g. `{"description": "..."}`)
         block = block.strip()
+        if not block:
+            out["action"] = {}
+            return out
         if block.startswith("{") and block.endswith("}"):
             try:
                 import json as _json
@@ -153,11 +157,14 @@ def judge(prop: dict, lint_targets: set[str]) -> tuple[str, str]:
         return ("defer", f"target file missing: {target}")
     fm, body = tgt
 
-    # mark-evergreen on meta-ish pages
+    # mark-evergreen on meta-ish pages, and only when the action sets nothing
+    # beyond `status: evergreen` (the applier writes whatever keys it holds)
     if ptype == "mark-evergreen":
-        if is_meta_page(target):
-            return ("auto", "mark-evergreen on meta page")
-        return ("defer", "mark-evergreen on non-meta page")
+        if not is_meta_page(target):
+            return ("defer", "mark-evergreen on non-meta page")
+        if "action" in prop and action not in ({}, {"status": "evergreen"}):
+            return ("defer", "mark-evergreen action sets more than status: evergreen")
+        return ("auto", "mark-evergreen on meta page")
 
     if ptype != "update-frontmatter":
         return ("defer", f"non-frontmatter proposal type: {ptype}")
