@@ -6,7 +6,8 @@ Findings:
 - dead_link: [[X]] target missing
 - frontmatter_missing: required fields absent (name, description, type)
 - frontmatter_invalid_type: type not in allowed set
-- duplicate_title: same H1/name in multiple pages
+- duplicate_title: same file name (slug) in multiple pages
+- duplicate_address: same frontmatter `address:` on multiple pages
 - stale: updated > 90 days ago; skipped for status evergreen/archived, index:false, folds/
 - hot_oversize: hot.md > HOT_MAX_BYTES (7168), the budget its injecting hooks check
 - log_oversize: log.md > 500 lines (cannot fire since log.md froze at 436 lines, 2026-09-26)
@@ -133,7 +134,7 @@ def brief_line(f: dict) -> str:
                 f" ({f['declared_by']} declares `{f['declared']}`)")
     if t == "dead_link":
         return f"{t}: [[{f['target']}]] in {', '.join(f['referrers'])}"
-    if t == "duplicate_title":
+    if t in ("duplicate_title", "duplicate_address"):
         return f"{t}: {', '.join(f['paths'])}"
     extra = ", ".join(f"{k}={','.join(v) if isinstance(v, list) else v}"
                       for k, v in f.items() if k not in ("type", "path"))
@@ -223,6 +224,18 @@ def main(brief: bool = False, only: set[str] | None = None):
                 "type": "duplicate_title",
                 "slug": s,
                 "paths": [p.relative_to(VAULT).as_posix() for p in ps],
+            })
+
+    by_address: dict[str, list[Path]] = {}
+    for p, fm in fm_cache.items():
+        if fm.get("address"):
+            by_address.setdefault(fm["address"], []).append(p)
+    for a, ps in by_address.items():
+        if len(ps) > 1:
+            findings.append({
+                "type": "duplicate_address",
+                "address": a,
+                "paths": sorted(p.relative_to(VAULT).as_posix() for p in ps),
             })
 
     for p, fm in fm_cache.items():

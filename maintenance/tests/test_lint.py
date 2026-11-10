@@ -204,3 +204,12 @@ def test_hot_oversize_counts_bytes_not_lines(lint_module, tmp_path, monkeypatch)
     assert hot_findings(lint_module, monkeypatch) == [{"type": "hot_oversize", "bytes": 12000, "max": 7168}]
     write(tmp_path / "hot.md", "short line\n" * 160)
     assert hot_findings(lint_module, monkeypatch) == []
+
+
+def test_duplicate_address_is_a_brief_finding(lint_module, tmp_path, monkeypatch):
+    fm = "address: c-000007\n"
+    write(tmp_path / "entities/a.md", graph_page("a", fm=fm) + "[[b]] [[c]]\n")
+    write(tmp_path / "entities/b.md", graph_page("b", fm=fm) + "[[a]]\n")
+    write(tmp_path / "entities/c.md", graph_page("c", fm="address: c-000008\n") + "[[a]]\n")
+    assert brief(lint_module, monkeypatch) == [
+        "duplicate_address: entities/a.md, entities/b.md"]
