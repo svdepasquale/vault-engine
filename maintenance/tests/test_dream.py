@@ -38,6 +38,16 @@ def test_strip_struck_replaces_spans_also_across_lines(dream):
     assert dream.strip_struck(text) == "keep [superseded] and [superseded] end"
 
 
+def test_strip_struck_never_crosses_a_paragraph_break(dream):
+    text = ("Run it with `~~` as approx marker.\n\n"
+            "The job runs nightly; restore tested.\n\n"
+            "Old: ~~weekly~~ now nightly.")
+    assert dream.strip_struck(text) == (
+        "Run it with `~~` as approx marker.\n\n"
+        "The job runs nightly; restore tested.\n\n"
+        "Old: [superseded] now nightly.")
+
+
 # ---------- parse_ideas ----------
 
 def test_parse_ideas_two_ideas_after_prose_with_stray_brace(dream):

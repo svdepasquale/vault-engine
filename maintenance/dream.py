@@ -62,7 +62,8 @@ BACKENDS = {
 }
 DEAD = {"archived", "decommissioned", "superseded", "closed", "deprecated", "erased"}  # = contextual-prefix.py STALE_STATUSES
 SEED_SKIP = re.compile(r"^wiki/(meta/profile/|overview\.md)")
-STRUCK = re.compile(r"~~.+?~~", re.S)
+# Never across a paragraph break, so a stray `~~` cannot swallow live text.
+STRUCK = re.compile(r"~~(?=\S)(?:(?!~~|\n\n).)+?~~", re.S)  # same as contextual-prefix.py
 KINDS = ("automation", "simplification", "synergy", "experiment", "question")
 THINK_CAP = 8192    # the evo server's reasoning-budget for Qwen3.8-Flash-Next (its models.ini)
 MIN_QUOTE = 15
