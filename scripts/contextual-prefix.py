@@ -38,6 +38,8 @@ Chunk schema written to .vault-meta/chunks/<page-address>/chunk-NNN.json:
   "raw_text": "...",
   "contextualized_text": "<prefix> <raw_text>",
   "prefix_source": "anthropic-api" | "claude-cli" | "synthetic" | "skipped",
+  "prefix_scheme": 2,            # 1 = page-only prefix, 2 = with the section path
+  "heading_path": ["Section", "Subsection"],  # headings in force where the chunk starts
   "char_count": 487,
   "body_hash": "sha256:...",     # of raw_text
   "page_body_hash": "sha256:...", # of the WHOLE source page (for invalidation)
@@ -138,6 +140,19 @@ WIKILINK_RE = re.compile(r"\[\[([^\]|]+)(?:\|[^\]]*)?\]\]")
 # (borrowed from agentmemory's "recall hygiene"; EMBED_SCHEME v6 in rerank.py).
 # Never across a paragraph break, so a stray `~~` cannot swallow a page.
 STRUCK_RE = re.compile(r"~~(?=\S)(?:(?!~~|\n\n).)+?~~", re.DOTALL)
+
+# Section context (2026-11-10). Chunks are cut by length and the synthetic
+# prefix was page-wide, so a chunk that starts mid-section said nothing about
+# the section it belongs to. The prefix now ends with the headings in force
+# where the chunk's own text starts (H2 and deeper; the H1 is the title).
+# WIKI_PREFIX_HEADINGS=0 restores the page-only prefix. The scheme is stored
+# in every chunk record, so flipping it rewrites the chunks on the next run.
+PREFIX_HEADINGS = os.environ.get("WIKI_PREFIX_HEADINGS", "1") != "0"
+PREFIX_SCHEME = 2 if PREFIX_HEADINGS else 1
+HEADING_RE = re.compile(r"^(#{1,6})[ \t]+(.+?)[ \t]*#*[ \t]*$")
+FENCE_RE = re.compile(r"^\s*(```|~~~)")
+HEADING_MAX_CHARS = 90
+HEADING_PATH_MAX_CHARS = 220
 
 
 def strip_struck(text):
@@ -241,40 +256,100 @@ def clean_overlap_tail(text, overlap):
     return tail
 
 
-def chunk_body(body, target_chars=CHUNK_TARGET_CHARS, overlap=CHUNK_OVERLAP_CHARS):
+def clean_heading(text):
+    """A heading as plain words: no struck text, link brackets or emphasis."""
+    text = strip_struck(text)
+    text = re.sub(r"\[\[(?:[^\]|]*\|)?([^\]]*)\]\]", r"\1", text)
+    text = re.sub(r"[*_`]", "", text)
+    return re.sub(r"\s+", " ", text).strip()[:HEADING_MAX_CHARS]
+
+
+class HeadingTracker:
+    """The stack of markdown headings in force, fed one paragraph at a time.
+    Lines inside fenced code are not headings (a `# comment` in a shell block)."""
+
+    def __init__(self):
+        self.stack = []        # [(level, text)]
+        self.in_fence = False
+
+    def path(self):
+        return tuple(t for level, t in self.stack if level > 1)
+
+    def feed(self, paragraph):
+        """Apply the paragraph's headings. Returns the path that frames the
+        paragraph's own text: the stack after its leading heading lines, without
+        those lines themselves (the chunk shows them)."""
+        leading, framed = True, None
+        for line in paragraph.split("\n"):
+            if FENCE_RE.match(line):
+                self.in_fence = not self.in_fence
+            m = None if self.in_fence or FENCE_RE.match(line) else HEADING_RE.match(line)
+            if not m:
+                if leading:
+                    leading = False
+                    if framed is None:
+                        framed = self.path()
+                continue
+            level, text = len(m.group(1)), clean_heading(m.group(2))
+            while self.stack and self.stack[-1][0] >= level:
+                self.stack.pop()
+            if leading:
+                framed = self.path()      # ancestors of a leading heading
+            if text:
+                self.stack.append((level, text))
+        return framed if framed is not None else self.path()
+
+
+def chunk_body(body, target_chars=CHUNK_TARGET_CHARS, overlap=CHUNK_OVERLAP_CHARS,
+               with_headings=False):
     """Split body into overlapping chunks on paragraph boundaries when possible.
     Heuristic: walk the body, accumulate paragraphs until len exceeds target,
     flush, then keep the trailing `overlap` chars as the seed of the next chunk.
     Empty paragraphs collapse to single boundaries. Paragraphs more than twice
     the target get a line-boundary hard split first.
+
+    with_headings=True returns (chunk, heading path) pairs: the headings in
+    force where the chunk's own text starts — after the overlap seed, which
+    belongs to the previous chunk. The chunks themselves are the same.
     """
     paragraphs = [p.strip() for p in re.split(r"\n\s*\n", body) if p.strip()]
     paragraphs = [q for p in paragraphs
                   for q in (hard_split_paragraph(p, target_chars)
                             if len(p) > target_chars * 2 else [p])]
     chunks = []
+    paths = []
+    tracker = HeadingTracker()
     cur = []
     cur_len = 0
+    cur_path = None
     for p in paragraphs:
+        framed = tracker.feed(p)
+        if cur_path is None:
+            cur_path = framed
         cur.append(p)
         cur_len += len(p) + 2
         if cur_len >= target_chars:
             chunk_text = "\n\n".join(cur)
             chunks.append(chunk_text)
+            paths.append(cur_path)
             # seed next chunk with the tail, snapped to a readable boundary
             tail = clean_overlap_tail(chunk_text, overlap)
             cur = [tail] if tail else []
             cur_len = len(tail)
+            cur_path = None
     if cur and "".join(cur).strip():
         chunks.append("\n\n".join(cur))
+        paths.append(cur_path if cur_path is not None else tracker.path())
     if not chunks and body.strip():
         # tiny page — single chunk
         chunks = [body.strip()]
-    return chunks
+        paths = [()]
+    return list(zip(chunks, paths)) if with_headings else chunks
 
 
-def synthetic_prefix(fm, body, chunk_text):
-    """Tier-3 prefix: page title + first sentence of the page body.
+def synthetic_prefix(fm, body, chunk_text, heading_path=()):
+    """Tier-3 prefix: page title + first sentence of the page body, then the
+    section the chunk sits in (PREFIX_HEADINGS).
     Free, hermetic, deterministic. Provides modest BM25 lift via title-word
     re-injection into the chunk corpus.
     """
@@ -283,6 +358,8 @@ def synthetic_prefix(fm, body, chunk_text):
     first_sentence = re.split(r"(?<=[.!?])\s+", strip_struck(body).strip(), maxsplit=1)
     first = first_sentence[0][:300] if first_sentence else ""
     prefix = f"This passage is from the wiki page \"{title}\". The page opens: {first}"
+    if PREFIX_HEADINGS and heading_path:
+        prefix += " Section: " + " > ".join(heading_path)[:HEADING_PATH_MAX_CHARS] + "."
     # Status-aware tail (2026-09-04): a stale page that stays indexed because it
     # is still the canonical answer to something (a replaced tool, a retired machine) must say
     # so in every chunk, or a retrieved chunk reads as current fact. Bumping
@@ -420,7 +497,7 @@ def pick_prefix_tier(force_synthetic, allow_egress=False):
     return "synthetic"
 
 
-def generate_prefix(tier, fm, body, chunk_text):
+def generate_prefix(tier, fm, body, chunk_text, heading_path=()):
     """Asymmetric fallback by design:
       - tier="anthropic-api" → on failure, try claude-cli (subprocess,
         free) before synthetic. The API is the user's stated preference,
@@ -441,13 +518,13 @@ def generate_prefix(tier, fm, body, chunk_text):
             result = claude_cli_prefix(title, body, chunk_text)
             if result:
                 return result, "claude-cli"
-        return synthetic_prefix(fm, body, chunk_text), "synthetic"
+        return synthetic_prefix(fm, body, chunk_text, heading_path), "synthetic"
     if tier == "claude-cli":
         result = claude_cli_prefix(title, body, chunk_text)
         if result:
             return result, "claude-cli"
-        return synthetic_prefix(fm, body, chunk_text), "synthetic"
-    return synthetic_prefix(fm, body, chunk_text), "synthetic"
+        return synthetic_prefix(fm, body, chunk_text, heading_path), "synthetic"
+    return synthetic_prefix(fm, body, chunk_text, heading_path), "synthetic"
 
 
 def process_page(page_path, force_synthetic=False, rebuild=False, peek=False,
@@ -465,7 +542,8 @@ def process_page(page_path, force_synthetic=False, rebuild=False, peek=False,
             log(f"ERR: cannot create chunk dir {chunk_dir}: {e}")
             raise SystemExit(EXIT_CHUNK_DIR)
 
-    chunks = chunk_body(content)
+    chunks_with_paths = chunk_body(content, with_headings=True)
+    chunks = [c for c, _ in chunks_with_paths]
     tier = pick_prefix_tier(force_synthetic, allow_egress=allow_egress)
 
     # Prune orphan chunk files left over from a previous, longer version of this
@@ -509,7 +587,8 @@ def process_page(page_path, force_synthetic=False, rebuild=False, peek=False,
             try:
                 existing = json.loads(chunk_path.read_text(encoding="utf-8"))
                 if existing.get("body_hash") == body_hash and \
-                   existing.get("page_body_hash") == page_body_hash:
+                   existing.get("page_body_hash") == page_body_hash and \
+                   existing.get("prefix_scheme", 1) == PREFIX_SCHEME:
                     skipped += 1
                     continue
             except (json.JSONDecodeError, OSError):
@@ -519,7 +598,8 @@ def process_page(page_path, force_synthetic=False, rebuild=False, peek=False,
             log(f"   would write {chunk_path.name} ({len(raw)} chars)")
             continue
 
-        prefix, prefix_source = generate_prefix(tier, fm, content, raw)
+        heading_path = chunks_with_paths[idx][1]
+        prefix, prefix_source = generate_prefix(tier, fm, content, raw, heading_path)
         indexed = strip_struck(raw)
         contextualized = f"{prefix}\n\n{indexed}" if prefix else indexed
 
@@ -532,6 +612,8 @@ def process_page(page_path, force_synthetic=False, rebuild=False, peek=False,
             "contextualized_text": contextualized,
             "prefix": prefix or "",
             "prefix_source": prefix_source,
+            "prefix_scheme": PREFIX_SCHEME,
+            "heading_path": list(heading_path),
             "char_count": len(raw),
             "body_hash": body_hash,
             "page_body_hash": page_body_hash,
