@@ -195,7 +195,12 @@ def hook():
         data = json.load(sys.stdin)
         prompt = data.get("prompt") or ""
         t0 = time.time()
-        decision = decide(prompt)
+        try:
+            decision = decide(prompt)
+        except Exception as e:
+            # A failed or timed-out retrieve still gets its log line: without it
+            # a dead hook looks idle and the latency median drops the slow runs.
+            decision = {"action": "error", "reason": type(e).__name__, "pointers": []}
         log_event(prompt, decision, int((time.time() - t0) * 1000))
         if decision["action"] == "inject":
             print(json.dumps({"hookSpecificOutput": {
