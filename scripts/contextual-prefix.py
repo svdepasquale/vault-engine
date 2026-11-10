@@ -191,9 +191,13 @@ def parse_frontmatter(body):
 
 
 def page_is_indexed(path):
-    """True unless the page's frontmatter says `index: false`."""
+    """True unless the page's frontmatter says `index: false`.
+
+    Reads like read_page (errors="replace"): one page with a stray non-UTF-8
+    byte must not abort the whole --all run before any page is processed.
+    """
     try:
-        fm, _ = parse_frontmatter(path.read_text(encoding="utf-8"))
+        fm, _ = parse_frontmatter(path.read_text(encoding="utf-8", errors="replace"))
     except OSError:
         return True
     return fm.get("indexed", True)
