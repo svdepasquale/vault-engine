@@ -74,8 +74,8 @@ grep -q 'clean_overlap_tail' "$ENGINE_ROOT/scripts/contextual-prefix.py" 2>/dev/
 grep -q 'per_page_cap' "$ENGINE_ROOT/scripts/retrieve.py" 2>/dev/null \
   || SENTINEL_MISSING="$SENTINEL_MISSING retrieve.py(per-page-cap)"
 if [ -n "$SENTINEL_MISSING" ]; then
-  echo "WARNING: local patches missing: $SENTINEL_MISSING — re-port from dragonscale-memory.md §v1.7.3/4/5"
-  osascript -e "display notification \"Local patches missing: $SENTINEL_MISSING — re-port from dragonscale-memory §v1.7.3/4/5\" with title \"Wiki Maintenance: patch regression\" sound name \"Basso\"" 2>/dev/null || true
+  echo "WARNING: local patches missing: $SENTINEL_MISSING — re-port from the vault's record of the local patches (v1.7.3/4/5)"
+  osascript -e "display notification \"Local patches missing: $SENTINEL_MISSING — re-port from the vault's record of the local patches (v1.7.3/4/5)\" with title \"Wiki Maintenance: patch regression\" sound name \"Basso\"" 2>/dev/null || true
 fi
 
 LMS_URL="${WIKI_LINT_URL:-http://127.0.0.1:1234}"
