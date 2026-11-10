@@ -51,3 +51,15 @@ def test_a_vault_under_a_dot_directory_still_yields_its_pages(monkeypatch, tmp_p
     write_page(vault, "wiki/.drafts/skip.md", "name: skip\ntype: entity")   # a dot-dir inside the vault is still skipped
     mod = load(monkeypatch, vault)
     assert [p.relative_to(mod.VAULT_ROOT).as_posix() for p in mod.collect_pages("--all")] == ["wiki/things/alpha.md"]
+
+
+def test_a_page_moved_without_an_edit_gets_its_new_path(monkeypatch, tmp_path):
+    vault = tmp_path / "vault"
+    old = write_page(vault, "wiki/entities/alpha.md", "name: alpha\naddress: c-000001\ntype: entity")
+    mod = load(monkeypatch, vault)
+    assert run_all(monkeypatch, mod) == 0
+    new = vault / "wiki" / "sources" / "alpha.md"
+    new.parent.mkdir(parents=True)
+    old.rename(new)
+    assert run_all(monkeypatch, mod) == 0
+    assert [r["page_path"] for r in chunk_records(mod)] == ["wiki/sources/alpha.md"]

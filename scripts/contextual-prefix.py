@@ -519,6 +519,7 @@ def process_page(page_path, force_synthetic=False, rebuild=False, peek=False,
 
     log(f"{progress}-> {page_path.relative_to(VAULT_ROOT)}  address={address}  chunks={len(chunks)}  tier={tier}")
 
+    rel_path = str(page_path.relative_to(VAULT_ROOT))
     written = []
     skipped = 0
     # Keep this loop sequential. The tier-1 Anthropic path caches the page body;
@@ -532,9 +533,13 @@ def process_page(page_path, force_synthetic=False, rebuild=False, peek=False,
         if chunk_path.exists() and not rebuild:
             try:
                 existing = json.loads(chunk_path.read_text(encoding="utf-8"))
+                # page_path too: a c- address does not follow the path, so a
+                # page moved without an edit lands in the same dir and would
+                # keep returning its old, dead path.
                 if existing.get("body_hash") == body_hash and \
                    existing.get("page_body_hash") == page_body_hash and \
-                   existing.get("prefix_scheme", 1) == PREFIX_SCHEME:
+                   existing.get("prefix_scheme", 1) == PREFIX_SCHEME and \
+                   existing.get("page_path") == rel_path:
                     skipped += 1
                     continue
             except (json.JSONDecodeError, OSError):
@@ -550,7 +555,7 @@ def process_page(page_path, force_synthetic=False, rebuild=False, peek=False,
 
         record = {
             "schema_version": 1,
-            "page_path": str(page_path.relative_to(VAULT_ROOT)),
+            "page_path": rel_path,
             "page_address": address,
             "chunk_index": idx,
             "raw_text": raw,
