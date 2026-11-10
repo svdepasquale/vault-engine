@@ -316,6 +316,7 @@ def test_mark_evergreen_meta_with_extra_keys_defers(judge_module):
 @pytest.mark.parametrize("action", [
     "",                                         # no action block at all
     "action:\n```yaml\n```\n",                  # empty block
+    "finding: stale\nrationale: Permanent record.\naction:\n```yaml\n# concrete change spec\nstatus: evergreen\n```\n\n---\n",
     'action:\n```yaml\nstatus: "evergreen" # permanent record\n```\n',
 ])
 def test_mark_evergreen_meta_plain_actions_apply(judge_module, action):
@@ -325,6 +326,28 @@ def test_mark_evergreen_meta_plain_actions_apply(judge_module, action):
     verdict, _ = mod.judge(mod.parse_proposal_block(block),
                            lint_targets={"meta/notes.md"})
     assert verdict == "auto"
+
+
+_EXTRA = 'status: evergreen\ndescription: "Replaced by the model"\n'
+
+
+@pytest.mark.parametrize("action", [
+    "action:\n```\n" + _EXTRA + "```\n",          # untagged fence
+    "action:\n```yml\n" + _EXTRA + "```\n",       # ```yml fence
+    "action:\n```yaml\n" + _EXTRA,                # unclosed ```yaml fence
+    "action:\n  " + _EXTRA.replace("\n", "\n  ").rstrip() + "\n",  # unfenced, indented
+    _EXTRA,                                       # bare keys, no action label
+    "action:\n```yaml\nstatus: evergreen\n```\n```yml\ndescription: x\n```\n",
+], ids=["untagged", "yml", "unclosed", "unfenced", "bare", "second-fence"])
+def test_mark_evergreen_meta_action_outside_yaml_block_defers(judge_module, action):
+    """The applier reads the raw block, so an action the ```yaml regex did
+    not pick up must not pass as 'no action'."""
+    mod, vault = judge_module
+    write_page(vault, "meta/notes.md", {"name": "Notes", "description": "Old"}, "x" * 250)
+    block = "type: mark-evergreen\ntarget: meta/notes.md\n" + action + "\n---\n"
+    verdict, _ = mod.judge(mod.parse_proposal_block(block),
+                           lint_targets={"meta/notes.md"})
+    assert verdict == "defer"
 
 
 def test_mark_evergreen_meta_unparseable_action_defers(judge_module):

@@ -116,6 +116,23 @@ def parse_proposal_block(body: str) -> dict:
     return out
 
 
+HEADER_LINE_RE = re.compile(r"^(?:type|target|finding|rationale):")
+
+
+def block_has_stray_content(raw: str) -> bool:
+    """True when the raw proposal holds anything beyond the header lines, the
+    `action:` label, the `---` separator and the one ```yaml block that
+    parse_proposal_block read. The applier works from the raw block, so an
+    action in an untagged, ```yml, unclosed or unfenced form still counts."""
+    rest = ACTION_BLOCK_RE.sub("", raw, count=1)
+    for line in rest.splitlines():
+        s = line.strip()
+        if not s or s in {"action:", "---"} or HEADER_LINE_RE.match(line):
+            continue
+        return True
+    return False
+
+
 def is_meta_page(rel_path: str) -> bool:
     name = rel_path.rsplit("/", 1)[-1]
     return (
@@ -164,6 +181,8 @@ def judge(prop: dict, lint_targets: set[str]) -> tuple[str, str]:
             return ("defer", "mark-evergreen on non-meta page")
         if "action" in prop and action not in ({}, {"status": "evergreen"}):
             return ("defer", "mark-evergreen action sets more than status: evergreen")
+        if block_has_stray_content(prop.get("raw", "")):
+            return ("defer", "mark-evergreen block holds content outside a parseable ```yaml action")
         return ("auto", "mark-evergreen on meta page")
 
     if ptype != "update-frontmatter":
