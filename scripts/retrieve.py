@@ -93,7 +93,10 @@ MAX_CHUNK_TEXT = 6000
 # margins before measuring; it passed the gate on every set in both modes, a
 # history probe whose answers live in folds, and the recall hook's calibration
 # set. WIKI_FOLD_WEIGHT=1 restores the old order. The raw cosines that recall.py
-# thresholds on are not touched.
+# thresholds on are not touched. The weight is applied as s - (1-w)*|s|, which is
+# s*w for the single-model cosine and the BM25 score (never negative) and still
+# a demotion for the mean z-score of a fused multi-model rerank, which is
+# negative below the pool mean (where s*w would move a fold up).
 FOLD_PREFIX = "wiki/folds/"
 FOLD_WEIGHT = 0.95
 
@@ -120,7 +123,8 @@ def apply_fold_weight(cands, w):
             # main() keeps BM25 order; rank on the BM25 score instead
             c["rerank_score"] = c.get("bm25_score") or 0.0
         if (c.get("page_path") or "").startswith(FOLD_PREFIX):
-            c["rerank_score"] = (c.get("rerank_score") or 0.0) * w
+            score = c.get("rerank_score") or 0.0
+            c["rerank_score"] = score - (1.0 - w) * abs(score)
     return cands
 
 

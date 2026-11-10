@@ -64,6 +64,15 @@ def test_without_a_reranker_it_ranks_on_the_bm25_score(monkeypatch, tmp_path):
     assert cands[1]["rerank_score"] == pytest.approx(9.8)
 
 
+def test_a_negative_fused_score_is_still_demoted(monkeypatch, tmp_path):
+    mod = load(monkeypatch, tmp_path)
+    cands = [cand("wiki/folds/fold-a.md", -0.39, source="cosine:model-a+model-b"),
+             cand("wiki/entities/x.md", -0.39, source="cosine:model-a+model-b")]
+    mod.apply_fold_weight(cands, mod.fold_weight())
+    assert cands[0]["rerank_score"] < cands[1]["rerank_score"] == -0.39
+    assert cands[0]["rerank_score"] == pytest.approx(-0.39 - 0.05 * 0.39)
+
+
 def test_a_bad_value_falls_back_to_the_default(monkeypatch, tmp_path):
     mod = load(monkeypatch, tmp_path, "abc")
     assert mod.fold_weight() == 0.95
