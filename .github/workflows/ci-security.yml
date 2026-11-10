@@ -131,8 +131,8 @@ jobs:
 
       # Pinned release binary rather than zizmorcore/zizmor-action: the action
       # is built around uploading SARIF to GitHub code scanning, which needs
-      # `security-events: write` and Advanced Security — not available on a
-      # user-owned private repo on Pro. The binary just fails the job instead.
+      # `security-events: write`. The binary is pinned to an exact version,
+      # needs no extra permission and fails the job directly.
       - name: Install zizmor
         env:
           # renovate: datasource=github-releases depName=zizmorcore/zizmor
