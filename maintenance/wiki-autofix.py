@@ -35,7 +35,7 @@ Safe to re-run; idempotent.
 """
 from __future__ import annotations
 import os
-import json, re, sys, hashlib
+import json, re, sys
 from pathlib import Path
 
 import yaml  # noqa: E402
@@ -47,16 +47,6 @@ ALLOWED_TYPES = {"user", "feedback", "entity", "source", "meta"}
 SKIP_PAGES = {"hot.md", "log.md", "index.md", "overview.md", "WIKI.md"}
 
 FRONTMATTER_RE = re.compile(r"^(---\n)(.*?)(\n---\n)", re.DOTALL)
-
-
-def vault_hash() -> str:
-    h = hashlib.sha256()
-    for p in sorted(VAULT.rglob("*.md")):
-        if ".lint" in p.parts:
-            continue
-        h.update(p.relative_to(VAULT).as_posix().encode())
-        h.update(p.read_bytes())
-    return h.hexdigest()[:16]
 
 
 def infer_type(rel: str) -> str | None:
@@ -144,7 +134,6 @@ def fix_page(path: Path) -> list[str]:
 
 
 def main():
-    sha_before = vault_hash()
     fixed = []
     for p in VAULT.rglob("*.md"):
         if ".lint" in p.parts:
@@ -154,8 +143,6 @@ def main():
             fixed.append({"path": p.relative_to(VAULT).as_posix(), "fields": added})
 
     out = {
-        "vault_sha_before": sha_before,
-        "vault_sha_after": vault_hash() if fixed else sha_before,
         "fixed_count": len(fixed),
         "fixed": fixed,
     }
