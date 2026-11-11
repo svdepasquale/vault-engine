@@ -168,7 +168,9 @@ def discover_chunks():
             continue
         chunk_id = f"{address}:{idx}"
         rel_path = str(chunk_file.relative_to(rel_root))
-        yield chunk_id, rel_path, text, input_hash(text)
+        # experiment: BM25 tokenizes `lexical_text` when present; the hash stays
+        # on contextualized_text, the embed-cache key.
+        yield chunk_id, rel_path, data.get("lexical_text") or text, input_hash(text)
 
 
 def build_index():

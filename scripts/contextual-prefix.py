@@ -89,6 +89,13 @@ CHUNK_TARGET_TOKENS = 500  # rough; we approximate via chars/4
 # evidence on both standard sets, at three results and at six (equal tokens).
 CHUNK_TARGET_CHARS = int(os.environ.get("WIKI_CHUNK_TARGET_CHARS") or CHUNK_TARGET_TOKENS * 4)
 CHUNK_OVERLAP_CHARS = int(os.environ.get("WIKI_CHUNK_OVERLAP_CHARS") or 200)
+# Experiment switches (2026-11-11, after soulwaxx/obsidian-second-brain #56; not merged).
+# WIKI_PREFIX_FRAME: opening (default) | description | both (every chunk) |
+# first-description (the description frame on chunk 0 only, the opening on the rest).
+# WIKI_LEXICAL_FRAME: "" (default) | description: BM25 indexes a `lexical_text`
+# framed by the description, the embedder keeps `contextualized_text`.
+PREFIX_FRAME = os.environ.get("WIKI_PREFIX_FRAME", "opening")
+LEXICAL_FRAME = os.environ.get("WIKI_LEXICAL_FRAME", "")
 
 # Pages excluded from --all indexing (explicit single-path runs bypass this).
 # log.md: append-only operation log — mentions every topic, so it BM25-matches
@@ -125,6 +132,7 @@ EXIT_CHUNK_DIR = 4
 FRONTMATTER_RE = re.compile(r"^---\n(.*?)\n---\n", re.DOTALL)
 ADDRESS_RE = re.compile(r"^address:\s*(c-\d{6})\s*$", re.MULTILINE)
 TITLE_RE = re.compile(r"^title:\s*['\"]?(.+?)['\"]?\s*$", re.MULTILINE)
+DESCRIPTION_RE = re.compile(r"^description:\s*['\"]?(.+?)['\"]?\s*$", re.MULTILINE)
 STATUS_RE = re.compile(r"^status:\s*['\"]?([\w-]+)['\"]?\s*$", re.MULTILINE)
 # `index: false` opts a page out of --all indexing (2026-09-04): for archived /
 # superseded pages that are not the canonical answer to anything, so they stop
@@ -177,12 +185,14 @@ def parse_frontmatter(body):
     rest = body[m.end():]
     addr_m = ADDRESS_RE.search(fm_text)
     title_m = TITLE_RE.search(fm_text)
+    desc_m = DESCRIPTION_RE.search(fm_text)
     status_m = STATUS_RE.search(fm_text)
     repl_m = REPLACED_BY_RE.search(fm_text)
     replaced_by = WIKILINK_RE.findall(repl_m.group(1)) if repl_m else []
     return {
         "address": addr_m.group(1) if addr_m else None,
         "title": title_m.group(1) if title_m else None,
+        "description": desc_m.group(1) if desc_m else None,
         "status": status_m.group(1) if status_m else None,
         "replaced_by": replaced_by,
         "indexed": not INDEX_FLAG_RE.search(fm_text),
@@ -294,7 +304,7 @@ def chunk_body(body, target_chars=CHUNK_TARGET_CHARS, overlap=CHUNK_OVERLAP_CHAR
     return chunks
 
 
-def synthetic_prefix(fm, body, chunk_text):
+def synthetic_prefix(fm, body, chunk_text, idx=None, frame=None):
     """Tier-3 prefix: page title + first sentence of the page body.
     Free, hermetic, deterministic. Provides modest BM25 lift via title-word
     re-injection into the chunk corpus.
@@ -303,7 +313,16 @@ def synthetic_prefix(fm, body, chunk_text):
     # First sentence of the body (not the chunk — gives the chunk a page-level frame)
     first_sentence = re.split(r"(?<=[.!?])\s+", strip_struck(body).strip(), maxsplit=1)
     first = first_sentence[0][:300] if first_sentence else ""
-    prefix = f"This passage is from the wiki page \"{title}\". The page opens: {first}"
+    desc = re.sub(r"\s+", " ", fm.get("description") or "").strip()[:400]
+    use = frame or PREFIX_FRAME
+    if use == "first-description":
+        use = "description" if idx == 0 else "opening"
+    if use == "description" and desc:
+        prefix = f"This passage is from the wiki page \"{title}\". The page is about: {desc}"
+    elif use == "both" and desc:
+        prefix = f"This passage is from the wiki page \"{title}\". The page is about: {desc} The page opens: {first}"
+    else:
+        prefix = f"This passage is from the wiki page \"{title}\". The page opens: {first}"
     # Status-aware tail (2026-09-04): a stale page that stays indexed because it
     # is still the canonical answer to something (a replaced tool, a retired machine) must say
     # so in every chunk, or a retrieved chunk reads as current fact. Bumping
@@ -441,7 +460,7 @@ def pick_prefix_tier(force_synthetic, allow_egress=False):
     return "synthetic"
 
 
-def generate_prefix(tier, fm, body, chunk_text):
+def generate_prefix(tier, fm, body, chunk_text, idx=None):
     """Asymmetric fallback by design:
       - tier="anthropic-api" → on failure, try claude-cli (subprocess,
         free) before synthetic. The API is the user's stated preference,
@@ -462,13 +481,13 @@ def generate_prefix(tier, fm, body, chunk_text):
             result = claude_cli_prefix(title, body, chunk_text)
             if result:
                 return result, "claude-cli"
-        return synthetic_prefix(fm, body, chunk_text), "synthetic"
+        return synthetic_prefix(fm, body, chunk_text, idx=idx), "synthetic"
     if tier == "claude-cli":
         result = claude_cli_prefix(title, body, chunk_text)
         if result:
             return result, "claude-cli"
-        return synthetic_prefix(fm, body, chunk_text), "synthetic"
-    return synthetic_prefix(fm, body, chunk_text), "synthetic"
+        return synthetic_prefix(fm, body, chunk_text, idx=idx), "synthetic"
+    return synthetic_prefix(fm, body, chunk_text, idx=idx), "synthetic"
 
 
 def process_page(page_path, force_synthetic=False, rebuild=False, peek=False,
@@ -563,7 +582,7 @@ def process_page(page_path, force_synthetic=False, rebuild=False, peek=False,
             log(f"   would write {chunk_path.name} ({len(raw)} chars)")
             continue
 
-        prefix, prefix_source = generate_prefix(tier, fm, content, raw)
+        prefix, prefix_source = generate_prefix(tier, fm, content, raw, idx=idx)
         indexed = strip_struck(raw)
         contextualized = f"{prefix}\n\n{indexed}" if prefix else indexed
 
@@ -582,6 +601,10 @@ def process_page(page_path, force_synthetic=False, rebuild=False, peek=False,
             "page_body_hash": page_body_hash,
             "created_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         }
+        if LEXICAL_FRAME:
+            lex = synthetic_prefix(fm, content, raw, idx=idx, frame=LEXICAL_FRAME)
+            if lex != prefix:
+                record["lexical_text"] = f"{lex}\n\n{indexed}"
         tmp = chunk_path.with_suffix(f".{os.getpid()}.tmp")
         try:
             tmp.write_text(json.dumps(record, ensure_ascii=False, indent=2), encoding="utf-8")

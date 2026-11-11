@@ -205,7 +205,7 @@ def main():
     parser.add_argument("--compact", action="store_true",
                         help="Minified JSON with minimal fields (chunk_id, page, "
                              "abs path, score).")
-    parser.add_argument("--per-page-cap", type=int, default=2,
+    parser.add_argument("--per-page-cap", type=int, default=int(os.environ.get("WIKI_PER_PAGE_CAP") or 2),  # experiment switch
                         help="Max chunks from any single page in the final result "
                              "(default 2; 0 disables). Stops one long page from "
                              "monopolising top-K — a 44-chunk archive page used to "
