@@ -42,5 +42,6 @@ def test_dump_writes_the_pairs_and_stamps_the_round(tmp_path, monkeypatch):
     assert "## 1. cos 0.910 — wiki/alpha.md (updated 2026-01-02, links B: yes)" in text
     assert "## 2." not in text   # past the top --pairs a pair is only listed, and only if unlinked
     assert "- 0.750  wiki/beta.md  <>  wiki/gamma.md  [c-2:1 | c-3:0]" in text
-    stamp = (tmp_path / "wiki" / ".lint" / ".last-learning").read_text(encoding="utf-8")
+    stamp = (tmp_path / ".vault-meta" / "last-learning").read_text(encoding="utf-8")
     assert re.fullmatch(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d[+-]\d\d:\d\d\n", stamp)
+    assert not (tmp_path / "wiki" / ".lint" / ".last-learning").exists()   # the old untracked stamp

@@ -4,8 +4,9 @@
 # lint, then asks an LLM to draft conservative fix proposals: local LM
 # Studio with qwen/qwen3.8-27b by default (since 2026-08-27), a remote
 # llama-server (Qwen3.8-Flash-Next) only with WIKI_LINT_BACKEND=evo + WIKI_LINT_EVO_URL, and no fallback
-# between them (step 0b). Writes inside the vault only through step 2a's
-# whitelisted frontmatter autofix, committed by name; otherwise it deposits a
+# between them (step 0b). Its tracked writes inside the vault are step 2a's
+# whitelisted frontmatter autofix, committed by name, and step 2b's run date
+# in .vault-meta/last-maintenance, left uncommitted; otherwise it deposits a
 # proposal file gated by a PENDING flag.
 set -euo pipefail
 
@@ -252,7 +253,12 @@ echo "findings=$COUNT vault_sha=$SHA"
 #
 # PENDING cannot serve as the marker either: it is removed once proposals are
 # applied, so a fully-applied vault would read as stale for the same reason.
-date -Iseconds > "$LINT_DIR/.last-run"
+#
+# The marker is tracked (.vault-meta/, not the ignored .lint/), so a run on
+# one clone of the vault dates the round on every clone once it is committed.
+# Until 2026-11-11 it was .lint/.last-run, which the tripwire still reads.
+mkdir -p "$VAULT_ROOT/.vault-meta"
+date -Iseconds > "$VAULT_ROOT/.vault-meta/last-maintenance"
 
 if [ "$COUNT" -eq 0 ]; then
   echo "clean, exit"
@@ -353,8 +359,9 @@ osascript -e "display notification \"auto=$AUTO defer=$DEFER (of $COUNT findings
 
 echo "=== done ==="
 
-# 6. push. The run's only tracked writes are step 2a's autofix pages,
-#    committed there by name; everything else lands in the ignored .lint/.
+# 6. push. The run's tracked writes are step 2a's autofix pages, committed
+#    there by name, and step 2b's .vault-meta/last-maintenance, left
+#    uncommitted like any leftover; everything else lands in the ignored .lint/.
 #    Until 2026-10-28 this step also staged `git add -A -- wiki .vault-meta`
 #    and committed it, but by then a dirty tree could only hold another live
 #    session's edits, possibly half-written, which went out under this run's

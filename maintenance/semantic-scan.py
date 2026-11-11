@@ -19,9 +19,10 @@ stages, run by hand now and then:
 
 Output: a proposals markdown file for Claude to verify and apply by hand; the
 model never edits a page. Nothing is written into wiki/ outside its untracked
-.lint/, where --dump also stamps .last-learning: a dump starts a round of
-Claude's judging, and the caller's SessionStart hook reminds when that date
-gets old (the round is on demand, never on a timer). The judge's URL passes
+.lint/. --dump also stamps the vault's tracked .vault-meta/last-learning: a
+dump starts a round of Claude's judging, and the caller's SessionStart hook
+reminds when that date gets old (the round is on demand, never on a timer);
+tracked, the date reaches every clone of the vault once it is committed. The judge's URL passes
 scripts/endpoint-guard.py first: this machine, the LAN or the tailnet, never a
 public address unless WIKI_ALLOW_PUBLIC_ENDPOINTS=1.
 """
@@ -41,7 +42,7 @@ from pathlib import Path
 VAULT_ROOT = Path(os.environ.get("WIKI_VAULT") or Path.home() / "projects" / "knowledge-vault").resolve()
 CHUNKS = VAULT_ROOT / ".vault-meta" / "chunks"
 CACHE = VAULT_ROOT / ".vault-meta" / "embed-cache.json"
-LEARNING_STAMP = VAULT_ROOT / "wiki" / ".lint" / ".last-learning"   # read by the caller's SessionStart hook
+LEARNING_STAMP = VAULT_ROOT / ".vault-meta" / "last-learning"   # tracked; read by the caller's SessionStart hook
 ENGINE_SCRIPTS = Path(__file__).resolve().parent.parent / "scripts"
 sys.path.insert(0, str(ENGINE_SCRIPTS))
 import importlib.util as _ilu
