@@ -5,10 +5,10 @@
 # ///
 """Deterministic safe autofix pass for the knowledge-vault.
 
-Runs BEFORE the LLM proposal stage. Handles fixes that need no model
+Runs first in wiki-maintenance.sh, before the lint. Handles fixes that need no
 judgement: derived from filename, path, or other frontmatter fields.
 
-Whitelist (only these classes; anything else stays for LLM/review):
+Whitelist (only these classes; anything else stays for review in a session):
 - frontmatter `name` missing  → use existing `title` value, else slug
 - frontmatter `type` missing  → infer from path:
     entities/         → entity

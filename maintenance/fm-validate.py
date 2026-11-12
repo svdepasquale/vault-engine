@@ -6,7 +6,7 @@
 """fm-validate.py — does YAML read a page's frontmatter the way the line readers do?
 
 Most vault scripts read frontmatter line by line (wiki-lint, contextual-prefix,
-consolidation-due); wiki-autofix, wiki-judge and outside tools parse it as YAML.
+consolidation-due); wiki-autofix and outside tools parse it as YAML.
 The two readings can disagree with neither one failing: an unquoted ` #` starts a
 YAML comment, so YAML keeps the text before it while the line readers keep the
 whole line (it happened: a batch of descriptions lost their tails that way and

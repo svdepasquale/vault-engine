@@ -316,8 +316,8 @@ def main(brief: bool = False, only: set[str] | None = None):
             findings.append({"type": "log_oversize", "lines": n})
 
     # log.md is excluded from the hash. Historically it was written on
-    # every maintenance/apply cycle, which made the PENDING staleness gate
-    # self-invalidate; since 2026-09-26 it is a frozen archive (git log is
+    # every maintenance/apply cycle, which made the staleness gate of the
+    # proposal pass (removed 2026-11-12) self-invalidate; since 2026-09-26 it is a frozen archive (git log is
     # the operation log), and the exclusion is kept as harmless.
     vault_hash = hashlib.sha256()
     for p in sorted(pages):
