@@ -19,6 +19,7 @@ Usage:
   python3 eval/run-eval.py --gold goldset-it.json   # Italian paired gold set
   python3 eval/run-eval.py --save /tmp/a.json       # keep each query's rank, labels, scores
   python3 eval/run-eval.py --compare /tmp/a.json    # list the queries that changed since
+  python3 eval/run-eval.py --uncovered              # the indexed pages no gold set targets, then exit
 
 Uses the same local embedding backend as retrieve.py (Homebrew llama-embedding
 on the GGUFs, or the HTTP backend named by WIKI_EMBED_URL); without it the rerank
@@ -40,6 +41,14 @@ Maintaining the gold set: `eval/goldset.json` is a list of
 {"q": <realistic question>, "gold": [<page paths that answer it>]}. Pages get
 renamed and merged, so a miss may mean the gold set drifted rather than that
 retrieval regressed — check the page still exists before chasing a fix.
+
+Coverage (2026-11-12): the other direction. A page added after a set was
+written never gets an item, so a change can regress on it while every row
+stays green. Every run prints how many indexed pages the set targets and how
+many any gold set in the vault's eval/ targets; `--uncovered` lists the pages
+no set targets, newest `created:` first and the undated last, then exits —
+the material for the next batch of items. The cut-off is not a gold file's
+last commit, which a marker fix moves.
 
 Knowledge-update items (2026-10-06, `goldset-ku*.json`) add "current" and
 optionally "stale": case-insensitive markers matched against each returned
@@ -138,6 +147,9 @@ def _pop_path(flag):
 
 
 SAVE, COMPARE = _pop_path("--save"), _pop_path("--compare")
+UNCOVERED = "--uncovered" in _args
+if UNCOVERED:
+    _args.remove("--uncovered")
 TOP = int(_args[0]) if _args else 3
 
 gold_bytes = GOLD.read_bytes()
@@ -174,6 +186,66 @@ def _index_sha():
 
 
 INDEX_SHA = _index_sha()
+
+_CREATED_RE = re.compile(r"^created:\s*['\"]?(\d{4}-\d{2}-\d{2})", re.MULTILINE)
+
+
+def _targets(items):
+    """Every page a gold file names: `gold` (the standard, KU and history
+    sets), `required` (the multi-page probe), `expected_pages` (the hook's)."""
+    out = set()
+    for it in items if isinstance(items, list) else []:
+        if isinstance(it, dict):
+            for key in ("gold", "required", "expected_pages"):
+                out.update(it.get(key) or [])
+    return out
+
+
+def _coverage():
+    """(indexed pages, those this set targets, those any set in eval/ targets).
+    Indexed = a page with a chunk in the BM25 index."""
+    try:
+        docs = json.loads(_bm25.read_text(encoding="utf-8")).get("docs", {})
+    except (OSError, json.JSONDecodeError):
+        docs = {}
+    pages = set()
+    for d in docs.values():
+        try:
+            page = json.loads((VAULT / d["path"]).read_text(encoding="utf-8")).get("page_path")
+        except (OSError, json.JSONDecodeError, KeyError, TypeError):
+            continue
+        if page:
+            pages.add(page)
+    every = set()
+    for f in sorted((VAULT / "eval").glob("*.json")):
+        try:
+            every |= _targets(json.loads(f.read_text(encoding="utf-8")))
+        except (OSError, json.JSONDecodeError):
+            continue
+    return pages, _targets(gold) & pages, every & pages
+
+
+def _created(page):
+    try:
+        m = _CREATED_RE.search((VAULT / page).read_text(encoding="utf-8", errors="replace")[:4096])
+    except OSError:
+        return None
+    return m.group(1) if m else None
+
+
+PAGES, COVERED, COVERED_ANY = _coverage()
+COVERAGE = (f"coverage: {len(COVERED)} of {len(PAGES)} indexed pages are a target of this set, "
+            f"{len(COVERED_ANY)} of any gold set in eval/")
+if UNCOVERED:
+    rest = PAGES - COVERED_ANY
+    created = {p: _created(p) for p in rest}
+    order = (sorted((p for p in rest if created[p]), key=lambda p: (-int(created[p].replace("-", "")), p))
+             + sorted(p for p in rest if not created[p]))
+    print(f"{COVERAGE}; {len(rest)} pages no set targets, newest created: first:")
+    for page in order:
+        print(f"  {created[page] or 'undated   '}  {page}")
+    sys.exit(0)
+
 r1 = r3 = rk = 0
 mrr = 0.0
 chars = 0
@@ -236,6 +308,7 @@ if partial:
 print(f"retrieve.py --top {TOP}   gold={GOLD.name} sha256:{GOLD_SHA}   n={n}   vault={HEAD}   "
       f"index={INDEX_SHA}   engine={ENGINE_HEAD}")
 print(f"  strategy={', '.join(sorted(strategies)) or 'none'}")
+print(f"  {COVERAGE}")
 print(f"  R@1={r1/n:.2f}  R@3={r3/n:.2f}  R@{TOP}={rk/n:.2f}  MRR={mrr/n:.3f}")
 print(f"  avg_chars={chars/n:.0f} (~{chars/n/4:.0f} tokens)  "
       f"avg_distinct_pages={pages_total/n:.2f}")

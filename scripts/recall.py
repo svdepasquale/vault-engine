@@ -15,7 +15,8 @@ Modes:
                                    UserPromptSubmit envelope (or nothing)
   recall.py "<prompt>"             debug: show the decision
   recall.py --eval GOLD.json [--cache .git/recall-eval-cache.json]
-                                   sweep thresholds on a labelled prompt set
+                                   sweep thresholds on a labelled prompt set,
+                                   after the ranking ceiling
 
 The hook never blocks a prompt: any error means no injection, exit 0.
 The log (.git/wiki-recall.log, untracked) stores a hash and the length of
@@ -235,6 +236,15 @@ def evaluate(gold_path, cache_path=None):
     nontrivial_skipped = [i["id"] for i, r in rows if i["kind"] != "trivial" and r is None]
     print(f"gold: {kinds}; trivial filtered {trivial_skipped}/{kinds['trivial']}; "
           f"non-trivial filtered as trivial: {nontrivial_skipped}")
+    # Ranking ceiling (2026-11-12): a positive whose expected page is not among
+    # the top MAX_POINTERS distinct pages before any threshold can never be a
+    # hit, so the gap between it and a row's recall is the threshold's and the
+    # rest of the misses are ranking's.
+    ceiling = sum(1 for item, res in rows
+                  if item["kind"] == "positive" and res is not None
+                  and {c["page"] for c in pick(res, float("-inf"))} & set(item["expected_pages"]))
+    print(f"ranking ceiling (expected page among the top {MAX_POINTERS} distinct pages, "
+          f"no threshold, feature {FEATURE}): {ceiling}/{kinds['positive']}")
     print("feature  thr   | pos: hit  wrong  silent | neg+trivial: injected | precision  recall  | avg ctx chars")
     best = None
     for which in ("qwen", "nomic", "mean"):
