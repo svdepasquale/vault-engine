@@ -213,3 +213,14 @@ def test_duplicate_address_is_a_brief_finding(lint_module, tmp_path, monkeypatch
     write(tmp_path / "entities/c.md", graph_page("c", fm="address: c-000008\n") + "[[a]]\n")
     assert brief(lint_module, monkeypatch) == [
         "duplicate_address: entities/a.md, entities/b.md"]
+
+
+@pytest.mark.parametrize("status", ["evergreen", "archived", "closed", "superseded", "decommissioned"])
+def test_age_does_not_flag_a_page_declared_ageless_or_not_current(lint_module, tmp_path, monkeypatch, status):
+    write(tmp_path / "entities/a.md", graph_page("a", fm=f"status: {status}\nupdated: 2020-01-01\n"))
+    assert [f for f in run(lint_module, monkeypatch) if f["type"] == "stale"] == []
+
+
+def test_age_still_flags_an_active_page(lint_module, tmp_path, monkeypatch):
+    write(tmp_path / "entities/a.md", graph_page("a", fm="status: active\nupdated: 2020-01-01\n"))
+    assert [f["path"] for f in run(lint_module, monkeypatch) if f["type"] == "stale"] == ["entities/a.md"]

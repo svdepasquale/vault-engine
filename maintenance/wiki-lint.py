@@ -62,6 +62,10 @@ REL_KEY = re.compile(r"^(\s+)([A-Za-z_][\w-]*):(.*)$")
 # Age and size findings are maintenance signals, not write errors: --brief skips them.
 # hot_oversize has its live alarm in the SessionStart and Stop hooks anyway.
 BRIEF_SKIP = {"stale", "hot_oversize", "log_oversize"}
+# Statuses the age check skips: evergreen by declaration, plus every status
+# that already marks a page as no longer current (the same set as
+# scripts/contextual-prefix.py STALE_STATUSES).
+AGELESS_STATUSES = {"evergreen", "archived", "superseded", "deprecated", "closed", "decommissioned", "erased"}
 # hot.md reaches the model whole through a SessionStart hook, and Claude Code
 # hands a hook's context over 10,000 characters to the model as a 2 KB preview
 # (2.1.310: 10,000 whole, 10,001 preview). Bytes track that limit, lines do not:
@@ -240,10 +244,12 @@ def main(brief: bool = False, only: set[str] | None = None):
 
     for p, fm in fm_cache.items():
         rel = p.relative_to(VAULT).as_posix()
-        # Age cannot make these stale: evergreen/archived pages by declaration,
-        # index:false pages (excluded from retrieval, answer nothing), and
-        # folds (extractive rollups of dated log entries, historically scoped).
-        if fm.get("status") in ("evergreen", "archived"):
+        # Age cannot make these stale: evergreen pages and pages already
+        # declared not current (the stale statuses contextual-prefix.py labels:
+        # a closed or superseded page does not age further), index:false pages
+        # (excluded from retrieval, answer nothing), and folds (extractive
+        # rollups of dated log entries, historically scoped).
+        if (fm.get("status") or "").strip().lower() in AGELESS_STATUSES:
             continue
         if str(fm.get("index", "")).lower() == "false" or rel.startswith("folds/"):
             continue
