@@ -8,7 +8,7 @@ Findings:
 - frontmatter_invalid_type: type not in allowed set
 - duplicate_title: same file name (slug) in multiple pages
 - duplicate_address: same frontmatter `address:` on multiple pages
-- stale: updated > 90 days ago; skipped for status evergreen/archived, index:false, folds/
+- stale: updated > 90 days ago; skipped for status evergreen and for the statuses that already mark a page not current (archived, superseded, deprecated, closed, decommissioned, erased), index:false, folds/
 - hot_oversize: hot.md > HOT_MAX_BYTES (7168), the budget its injecting hooks check
 - log_oversize: log.md > 500 lines (cannot fire since log.md froze at 436 lines, 2026-09-26)
 - relation_unknown_predicate: a `relations:` key outside the typed-graph vocabulary
