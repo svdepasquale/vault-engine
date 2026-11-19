@@ -211,6 +211,35 @@ CE_GGUF = os.environ.get(
     "WIKI_CE_GGUF", "gpustack/bge-reranker-v2-m3-GGUF/bge-reranker-v2-m3-Q8_0.gguf")
 CE_SEP = "<#wiki-cls-sep#>"
 
+# A Metal command buffer that runs out of GPU memory is only logged: under
+# memory pressure llama-embedding (1.0.0, build 12359) still exited 0 and printed
+# an all-zero vector per text (issue #6, from a sibling setup, 2026-11-18). A zero
+# vector scores cosine 0 against everything, and cached under its chunk's
+# input_hash it would stay wrong until that text changes. So a run that logs
+# one of these lines fails like a non-zero exit, and only a usable vector is
+# scored or cached.
+LOCAL_FAILURE_MARKERS = ("command buffer", "failed to process")
+
+
+def run_failure(proc, what):
+    """Why a llama-embedding run failed, or None when it did not."""
+    err = proc.stderr.decode("utf-8", "replace")
+    if proc.returncode != 0:
+        tail = err.strip().splitlines()[-3:]
+        return f"{what} exit {proc.returncode}: {' | '.join(tail)}"
+    for line in err.splitlines():
+        if any(m in line for m in LOCAL_FAILURE_MARKERS):
+            return f"{what} exited 0 but logged: {line.strip()[:200]}"
+    return None
+
+
+def usable(vec):
+    """True for a vector worth scoring and caching: finite numbers, not all zero."""
+    try:
+        return bool(vec) and any(vec) and all(map(math.isfinite, vec))
+    except TypeError:
+        return False
+
 
 def ce_missing():
     """Why the requested cross-encoder cannot run here, or None when it can."""
@@ -246,9 +275,9 @@ def cross_encode(query, docs):
             os.unlink(path)
         except OSError:
             pass
-    if proc.returncode != 0:
-        tail = proc.stderr.decode("utf-8", "replace").strip().splitlines()[-3:]
-        raise RuntimeError(f"llama-embedding (rank) exit {proc.returncode}: {' | '.join(tail)}")
+    why = run_failure(proc, "llama-embedding (rank)")
+    if why:
+        raise RuntimeError(why)
     scores = [s[0] if isinstance(s, list) else s for s in json.loads(proc.stdout)]
     if len(scores) != len(docs):
         raise RuntimeError(f"cross-encoder returned {len(scores)} scores for {len(docs)} pairs")
@@ -279,12 +308,16 @@ def _run_llama_embedding(model, texts):
             os.unlink(path)
         except OSError:
             pass
-    if proc.returncode != 0:
-        tail = proc.stderr.decode("utf-8", "replace").strip().splitlines()[-3:]
-        raise RuntimeError(f"llama-embedding exit {proc.returncode}: {' | '.join(tail)}")
+    why = run_failure(proc, "llama-embedding")
+    if why:
+        raise RuntimeError(why)
     vecs = json.loads(proc.stdout)
     if len(vecs) != len(texts):
         raise RuntimeError(f"llama-embedding returned {len(vecs)} vectors for {len(texts)} texts")
+    bad = sum(1 for v in vecs if not usable(v))
+    if bad:
+        raise RuntimeError(f"llama-embedding returned {bad} zero or non-finite vector(s) "
+                           f"of {len(vecs)}")
     return vecs
 
 
@@ -599,7 +632,7 @@ def rerank(query, candidates, top_k=5, allow_remote=False,
                 except Exception as e:
                     log(f"embed failed for one chunk ({model}): {e}")
                     vecs.append(None)
-        if not vecs or vecs[0] is None:
+        if not vecs or not usable(vecs[0]):
             raise RuntimeError("query embedding failed")
         return vecs
 
@@ -616,7 +649,7 @@ def rerank(query, candidates, top_k=5, allow_remote=False,
     for model in active:
         _, keys = jobs[model]
         for key, vec in zip(keys[1:], results[model][1:]):
-            if vec:
+            if usable(vec):
                 cache[key] = vec
                 cache_dirty = True
 
@@ -759,7 +792,7 @@ def embed_all(allow_remote, batch=64):
                 log(f"embed-all: batch {i // batch} failed ({model}): {e}")
                 continue
             for (key, _), vec in zip(part, vecs):
-                if vec:
+                if usable(vec):
                     cache[key] = vec
                     added += 1
         log(f"embed-all: {tag}{model}: {len(todo)} to embed of {len(chunks)} chunks "

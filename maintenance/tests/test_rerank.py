@@ -11,13 +11,30 @@ SCRIPT = Path(__file__).resolve().parent.parent.parent / "scripts" / "rerank.py"
 # length of its document, and prints the rows the way --pooling rank does —
 # n_embd wide, the pair's score first.
 FAKE = r'''#!/usr/bin/env python3
-import json, sys
+import json, os, sys
 args = sys.argv[1:]
 open(sys.argv[0] + ".args", "w").write(json.dumps(args))
 text = open(args[args.index("-f") + 1], encoding="utf-8").read()
 sep, cls = args[args.index("--embd-separator") + 1], args[args.index("--cls-separator") + 1]
+sys.stderr.write(os.environ.get("FAKE_STDERR", ""))
 print(json.dumps([[float(len(p.split(cls)[1]))] + [0.0] * 7 for p in text.split(sep)]))
 '''
+
+# The embedding path: [0.6, 0.8] per text, all zeros for a text containing "zero".
+FAKE_EMBED = r'''#!/usr/bin/env python3
+import json, os, sys
+args = sys.argv[1:]
+text = open(args[args.index("-f") + 1], encoding="utf-8").read()
+sys.stderr.write(os.environ.get("FAKE_STDERR", ""))
+print(json.dumps([[0.0, 0.0] if "zero" in t else [0.6, 0.8]
+                  for t in text.split(args[args.index("--embd-separator") + 1])]))
+'''
+
+# What llama.cpp 1.0.0's Metal backend logged when a command buffer ran out of
+# GPU memory; llama-embedding still exited 0, with an all-zero vector per text.
+METAL_OOM = ("ggml_metal_synchronize: error: command buffer 0 failed with status 5\n"
+             "error: Insufficient Memory (00000008:kIOGPUCommandBufferCallbackErrorOutOfMemory)\n")
+QWEN = "text-embedding-qwen3-embedding-0.6b"
 
 
 def load(monkeypatch, tmp_path, mode):
@@ -162,3 +179,58 @@ def test_save_cache_leaves_nothing_the_vault_would_commit(monkeypatch, tmp_path)
     assert seen and seen[0].startswith("embed-cache.json.tmp.")    # matches the vault's *.tmp.* rule
     assert not list(meta.glob("*.tmp*"))                            # and is gone after a failed write
     assert not (meta / "hook.log").exists()
+
+
+def embedder(monkeypatch, tmp_path):
+    mod, fake = load(monkeypatch, tmp_path, "off")
+    fake.write_text(FAKE_EMBED)
+    return mod
+
+
+def test_a_zero_vector_or_a_logged_metal_failure_fails_the_run(monkeypatch, tmp_path):
+    mod = embedder(monkeypatch, tmp_path)
+    assert mod._run_llama_embedding(QWEN, ["one", "two"]) == [[0.6, 0.8], [0.6, 0.8]]
+    with pytest.raises(RuntimeError, match="1 zero or non-finite vector"):
+        mod._run_llama_embedding(QWEN, ["one", "zero"])
+    monkeypatch.setenv("FAKE_STDERR", METAL_OOM)
+    with pytest.raises(RuntimeError, match="exited 0 but logged: .*command buffer 0 failed"):
+        mod._run_llama_embedding(QWEN, ["one"])
+
+
+def test_a_logged_metal_failure_fails_the_cross_encoder_too(monkeypatch, tmp_path):
+    mod, _ = load(monkeypatch, tmp_path, "fuse")
+    assert mod.cross_encode("q", ["doc"]) == [3.0]
+    monkeypatch.setenv("FAKE_STDERR", METAL_OOM)
+    with pytest.raises(RuntimeError, match=r"llama-embedding \(rank\) exited 0 but logged"):
+        mod.cross_encode("q", ["doc"])
+
+
+def test_a_failed_batch_keeps_its_good_vectors(monkeypatch, tmp_path):
+    mod = embedder(monkeypatch, tmp_path)
+    assert mod.local_embed_batch(QWEN, ["one", "zero", "two"]) == [[0.6, 0.8], None, [0.6, 0.8]]
+    assert not mod.usable([0.0, 0.0]) and not mod.usable([]) and not mod.usable(None)
+    assert not mod.usable([float("nan"), 1.0]) and not mod.usable(["x"])
+    assert mod.usable([0.0, 1.0])
+
+
+def test_a_zero_vector_is_never_scored_or_cached(monkeypatch, tmp_path):
+    mod = embedder(monkeypatch, tmp_path)
+    chunks = {"a": {"contextualized_text": "fine chunk"}, "b": {"contextualized_text": "zero chunk"}}
+    saved = {}
+    monkeypatch.setattr(mod, "pick_backend", lambda allow_remote: ("local", [QWEN], None))
+    monkeypatch.setattr(mod, "load_chunk", lambda path: chunks.get(path))
+    monkeypatch.setattr(mod, "load_cache", lambda: ({}, 0))
+    monkeypatch.setattr(mod, "save_cache", lambda c: saved.update(c))
+    out = mod.rerank("q", [{"path": "b"}, {"path": "a"}], top_k=None)
+    # the batch fails on b's zero vector; text by text, a keeps its vector and b has none
+    assert [(c["path"], c["rerank_source"]) for c in out] == [
+        ("a", f"cosine:{mod.LOCAL_TAG}{QWEN}"), ("b", "missing-chunk")]
+    assert list(saved.values()) == [[0.6, 0.8]]
+    # a zero query vector leaves the input order, labelled, and caches nothing
+    saved.clear()
+    out = mod.rerank("zero", [{"path": "a"}], top_k=None)
+    assert [c["rerank_source"] for c in out] == ["noop-embed-error"] and not saved
+    # a run that logged a Metal failure is no better than a zero vector
+    monkeypatch.setenv("FAKE_STDERR", METAL_OOM)
+    out = mod.rerank("q", [{"path": "a"}], top_k=None)
+    assert [c["rerank_source"] for c in out] == ["noop-embed-error"] and not saved
