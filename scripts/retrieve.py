@@ -10,6 +10,9 @@ Pipeline (v1.7):
                               nearest the query by cached vector, so a page
                               BM25 cannot see — an Italian query over English
                               pages — still competes)
+         →  experiment       (off by default: WIKI_DENSE_UNION adds the nearest
+                              chunks by vector to every pool, WIKI_LEXICAL_WEIGHT
+                              adds a share of the BM25 score to the cosine)
          →  fold prior       (since 2026-11-07 chunks of wiki/folds/, the log's
                               history rollups, rank at 0.95x; WIKI_FOLD_WEIGHT)
          →  drill            (return chunk pages with absolute paths so the
@@ -111,6 +114,38 @@ def fold_weight():
     except ValueError:
         log(f"WARN: WIKI_FOLD_WEIGHT={raw!r} is not a number — using {FOLD_WEIGHT}")
         return FOLD_WEIGHT
+
+
+# Experiment (2026-11-20, off by default): a page whose chunks sit just past the
+# BM25 pool's edge cannot be reranked up, however near its vector is to the
+# query, and a pool of exactly --bm25-top weak hits gets no dense fill.
+# WIKI_DENSE_UNION=K adds the K chunks nearest the query by cached vector to
+# every non-empty pool (a short pool still gets at least its fill).
+# WIKI_LEXICAL_WEIGHT=b adds b * bm25 / (the query's top BM25 score) to each
+# reranked cosine, so a lexical hit keeps an edge over a chunk the union
+# brought in on its vector alone; the divisor is one constant per query, so a
+# chunk's score does not depend on what else is in the pool. Both act only
+# after an embedder ran: the BM25-only fallback is unchanged.
+def env_number(name, cast, default):
+    """The environment variable `name` as a number, or `default` when unset or malformed."""
+    raw = os.environ.get(name, "").strip()
+    if not raw:
+        return default
+    try:
+        return cast(raw)
+    except ValueError:
+        log(f"WARN: {name}={raw!r} is not a number — using {default}")
+        return default
+
+
+def add_lexical_share(cands, weight, top_bm25):
+    """Add weight * bm25_score / top_bm25 to every reranked candidate's score, in place."""
+    if weight <= 0 or top_bm25 <= 0:
+        return cands
+    for c in cands:
+        if str(c.get("rerank_source", "")).startswith("cosine"):
+            c["rerank_score"] += weight * (c.get("bm25_score") or 0.0) / top_bm25
+    return cands
 
 
 def apply_fold_weight(cands, w):
@@ -238,7 +273,14 @@ def main():
     reranker = import_sibling("rerank", "rerank.py")
 
     index = bm25.load_index()
-    bm25_hits = bm25.query(args.query, top_k=args.bm25_top, idx=index)
+    union_k = max(0, env_number("WIKI_DENSE_UNION", int, 0))
+    lexical = max(0.0, env_number("WIKI_LEXICAL_WEIGHT", float, 0.0))
+    # The union's chunks need their own BM25 score, past the pool: take the
+    # full ranking once and slice the pool from it (one stable sort either way).
+    ranking = bm25.query(args.query, top_k=len(index["docs"]) if union_k or lexical
+                         else args.bm25_top, idx=index)
+    bm25_hits = ranking[:args.bm25_top]
+    bm25_of = {h["chunk_id"]: h["score"] for h in ranking}
     log(f"bm25: {len(bm25_hits)} hits")
 
     candidates = [c for c in (build_candidate(h["chunk_id"], h["path"], h["score"])
@@ -269,9 +311,10 @@ def main():
             args.query, candidates, top_k=None,  # the fill may add candidates; all go on
             allow_remote=args.allow_remote_backend,
             dense_pool={cid: d for cid, d in index["docs"].items() if d.get("input_hash")},
-            dense_k=fill,
-            make_candidate=lambda cid, path: build_candidate(cid, path, 0.0),
+            dense_k=max(fill, union_k),
+            make_candidate=lambda cid, path: build_candidate(cid, path, bm25_of.get(cid, 0.0)),
         )
+        add_lexical_share(final, lexical, bm25_hits[0]["score"] if bm25_hits else 0.0)
         # Derive strategy from first candidate's rerank_source
         first_src = (final[0].get("rerank_source") if final else "unknown")
         strategy = f"bm25+rerank:{first_src}"
