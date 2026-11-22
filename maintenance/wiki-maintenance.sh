@@ -5,7 +5,8 @@
 # ignored wiki/.lint/report.json and the run date in
 # .vault-meta/last-maintenance, left uncommitted. The findings are judged and
 # fixed in a session, by Claude; the write errors among them already reach
-# every session through the hooks' `wiki-lint.py --brief`.
+# every session through the hooks' `wiki-lint.py --brief`. A WIKI_VAULT with
+# no wiki/ directory exits 4 before anything is written.
 #
 # Until 2026-11-12 a model drafted fix proposals from the report (a local
 # model through LM Studio, or a remote llama-server), a judge split them into
@@ -21,6 +22,14 @@ VAULT_ROOT="$WIKI_VAULT"
 VAULT="$VAULT_ROOT/wiki"
 LINT_DIR="$VAULT/.lint"
 LOG="$HOME/Library/Logs/wiki-maintenance.log"
+
+# A mistyped WIKI_VAULT must fail here: the mkdir below would make a wiki/
+# there, which the other scripts' checks would then take for a vault. Before
+# the log redirect, so the message reaches whoever ran this.
+if [ ! -d "$VAULT" ]; then
+  echo "ERR: no vault at $VAULT_ROOT (no wiki/ directory). Check WIKI_VAULT." >&2
+  exit 4
+fi
 
 mkdir -p "$LINT_DIR" "$(dirname "$LOG")"
 exec >>"$LOG" 2>&1

@@ -10,12 +10,16 @@ from pathlib import Path
 
 import pytest
 
-SCRIPTS = Path(__file__).resolve().parent.parent.parent / "scripts"
+ENGINE = Path(__file__).resolve().parent.parent.parent
+SCRIPTS = ENGINE / "scripts"
 ALLOCATE = ["bash", str(SCRIPTS / "allocate-address.sh")]
 
 
 def run(cmd, vault):
-    env = {**os.environ, "WIKI_VAULT": str(vault)}
+    # A scratch HOME too: wiki-maintenance.sh logs under $HOME, and a check
+    # that failed to stop it must not write into the real one.
+    home = vault.parent / "home"
+    env = {**os.environ, "WIKI_VAULT": str(vault), "HOME": str(home)}
     return subprocess.run(cmd, env=env, capture_output=True, text=True, check=False)
 
 
@@ -27,6 +31,10 @@ COMMANDS = {
     "contextual-prefix --peek": ([sys.executable, str(SCRIPTS / "contextual-prefix.py"), "--peek"], 5, True),
     "bm25 build": ([sys.executable, str(SCRIPTS / "bm25-index.py"), "build"], 4, True),
     "retrieve": ([sys.executable, str(SCRIPTS / "retrieve.py"), "anything"], 10, False),
+    "wiki-maintenance": (["bash", str(ENGINE / "maintenance" / "wiki-maintenance.sh")], 4, True),
+    # These two write under wiki/.lint/ only after their pairs, which need the embed cache.
+    "semantic-scan --dry": ([sys.executable, str(ENGINE / "maintenance" / "semantic-scan.py"), "--dry"], 2, False),
+    "dream --dry": ([sys.executable, str(ENGINE / "maintenance" / "dream.py"), "--dry"], 2, False),
 }
 
 
@@ -47,6 +55,7 @@ def test_a_wrong_vault_path_fails_and_creates_nothing(tmp_path, name, where):
         assert not vault.exists()
     else:
         assert list(vault.iterdir()) == []
+    assert not (tmp_path / "home").exists()
 
 
 def test_allocation_still_starts_at_one_in_a_new_vault(tmp_path):
