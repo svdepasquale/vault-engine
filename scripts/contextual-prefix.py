@@ -61,6 +61,7 @@ Exit codes:
   2 — usage error
   3 — page file missing or unreadable
   4 — chunk dir creation failed
+  5 — no vault at WIKI_VAULT (no wiki/ directory there); nothing is written
 """
 
 import argparse
@@ -121,6 +122,7 @@ EXIT_OK = 0
 EXIT_USAGE = 2
 EXIT_PAGE_MISSING = 3
 EXIT_CHUNK_DIR = 4
+EXIT_NO_VAULT = 5
 
 FRONTMATTER_RE = re.compile(r"^---\n(.*?)\n---\n", re.DOTALL)
 ADDRESS_RE = re.compile(r"^address:\s*(c-\d{6})\s*$", re.MULTILINE)
@@ -656,6 +658,12 @@ def main():
                         help="Skip garbage-collection of chunk dirs whose page no "
                              "longer resolves to that address (--all runs only).")
     args = parser.parse_args()
+
+    # A mistyped WIKI_VAULT must fail, not report an empty vault as done
+    # ("pages=0" at exit 0) or file chunks where no vault is.
+    if not WIKI_DIR.is_dir():
+        log(f"ERR: no vault at {VAULT_ROOT} (no wiki/ directory). Check WIKI_VAULT.")
+        return EXIT_NO_VAULT
 
     if args.all and not args.path:
         args.path = "--all"

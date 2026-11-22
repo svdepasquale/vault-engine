@@ -48,7 +48,8 @@ Exit codes:
   1 — lock acquisition failed
   2 — usage error
   3 — index file missing or corrupt (query mode)
-  4 — chunks directory missing
+  4 — chunks directory missing (build checks it before taking the lock, so a
+      mistyped WIKI_VAULT leaves nothing behind)
 """
 
 import argparse
@@ -365,6 +366,12 @@ def main():
     args = parser.parse_args()
 
     if args.cmd == "build":
+        # Before the lock: acquire_lock() creates .vault-meta/, and a mistyped
+        # WIKI_VAULT must not get one.
+        if not CHUNKS_DIR.is_dir():
+            log(f"ERR: no chunks directory at {CHUNKS_DIR}. "
+                "Run contextual-prefix.py --all first, or check WIKI_VAULT.")
+            return EXIT_NO_CHUNKS
         fd = acquire_lock()
         try:
             index = build_index()

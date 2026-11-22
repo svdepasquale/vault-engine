@@ -4,7 +4,9 @@
 # Reserves the next address of the form c-NNNNNN and increments the counter
 # under an exclusive flock. On missing counter file, recovers by scanning the
 # vault for the highest existing c-NNNNNN in page frontmatter and resuming from
-# max+1. Never silently resets to 1 in a non-empty vault.
+# max+1. Never silently resets to 1 in a non-empty vault, and refuses a
+# WIKI_VAULT with no wiki/ directory, so a mistyped path cannot start a second
+# counter at 1.
 #
 # Usage:
 #   ./scripts/allocate-address.sh           # prints the reserved address (e.g. c-000042) to stdout
@@ -16,6 +18,7 @@
 #   1 — lock acquisition failed (another writer is holding the lock)
 #   2 — vault-meta directory missing and cannot be created
 #   3 — counter value corrupt or non-numeric
+#   4 — no vault at WIKI_VAULT (no wiki/ directory there); nothing is created
 
 set -euo pipefail
 
@@ -25,6 +28,13 @@ LOCK_FILE="${VAULT_ROOT}/.vault-meta/.address.lock"
 WIKI_DIR="${VAULT_ROOT}/wiki"
 
 MODE="${1:-allocate}"
+
+# A mistyped WIKI_VAULT must fail here, before anything is created: the scan
+# below would find no page at that path and hand out c-000001 again.
+if [ ! -d "$WIKI_DIR" ]; then
+  echo "ERR: no vault at $VAULT_ROOT (no wiki/ directory). Check WIKI_VAULT." >&2
+  exit 4
+fi
 
 mkdir -p "$(dirname "$COUNTER_FILE")" || {
   echo "ERR: cannot create .vault-meta/" >&2
