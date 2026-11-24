@@ -754,10 +754,14 @@ def rerank(query, candidates, top_k=5, allow_remote=False,
 def embed_all(allow_remote, batch=64):
     """Pre-embed every chunk that has no cached vector yet (one-shot).
 
-    Query time then only embeds the query plus chunks written since. Also run
-    by the SessionEnd auto-commit worker after an index refresh (detached, so
-    it never delays exit), so the per-prompt recall hook never pays for lazy
-    embedding inside its time budget.
+    Query time then only embeds the query plus chunks written since, so the
+    per-prompt recall hook never pays for lazy embedding inside its time
+    budget; the dense fill reads cached vectors only, so a chunk with none is
+    invisible to it. The caller's auto-commit worker runs this on every pass
+    (detached, so it never delays exit), not only after its own index refresh:
+    a refresh run by hand leaves the index fresh, and the chunks it wrote kept
+    no vector until a later page edit (issue #9). With nothing missing it
+    embeds and writes nothing (~0.2 s).
     """
     kind, active, url = pick_backend(allow_remote)
     if kind is None or not active:
