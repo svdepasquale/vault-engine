@@ -8,7 +8,7 @@ argument-hint: "[maintenance | learning | dream | all]"
 
 The rounds stay on demand. This skill is how the user asks for one, on whichever machine holds the session; it is not a timer's entry point (an unattended `semantic-scan.py --dump` would date the learning round with no judging done). Vault: `${WIKI_VAULT:-$HOME/projects/knowledge-vault}`. Engine: `$HOME/projects/vault-engine`. Resolve both to absolute paths on this machine.
 
-Argument: `maintenance`, `learning`, `dream`, or `all` (the three, in that order). With no argument, run the rounds the SessionStart section "Vault rounds due" lists as due. If none is due, say so and ask which one.
+Argument: `maintenance`, `learning`, `dream`, or `all` (the three, in that order). The dream runs only when named, as `dream` or `all`. With no argument, decide what is due after step 3's sync, from the vault's own markers, not from the SessionStart section, which is read before the sync. The markers are `.vault-meta/last-maintenance` (due at 21 days), `.vault-meta/last-learning` (30) and the newest `date` in `maintenance/dream-ledger.jsonl` (30). Run the due maintenance and learning, and name the dream if it is due. If nothing is due, say so and ask which one.
 
 ## Before any round
 
@@ -27,7 +27,7 @@ The procedures page has the steps; in short:
 2. Claude judges each pair against the live pages. A read-only subagent for the 30 pairs is the usual shape.
 3. Re-check every proposal at its source before applying it.
 4. Apply the verified fixes and links: typed relations on both pages, one commit per page. A fact that replaces another is replaced on every living page that states it.
-5. Read the `hub_lag` pages from the maintenance report.
+5. Read the `hub_lag` pages from a fresh full lint: `python3 <engine>/maintenance/wiki-lint.py > <scratchpad>/lint.json`, unless maintenance ran in this session. `wiki/.lint/report.json` belongs to one clone and can be weeks old.
 6. Run `wiki-lint.py`, refresh the index, and run the acceptance gate (vault `CLAUDE.md` §Acceptance gate).
 
 Every write happens in this session, where the user sees it.
