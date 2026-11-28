@@ -224,3 +224,111 @@ def test_age_does_not_flag_a_page_declared_ageless_or_not_current(lint_module, t
 def test_age_still_flags_an_active_page(lint_module, tmp_path, monkeypatch):
     write(tmp_path / "entities/a.md", graph_page("a", fm="status: active\nupdated: 2020-01-01\n"))
     assert [f["path"] for f in run(lint_module, monkeypatch) if f["type"] == "stale"] == ["entities/a.md"]
+
+
+# --- hub_lag ---------------------------------------------------------------
+
+HUB_TODAY = __import__("datetime").date(2026, 3, 1)
+
+
+def hub_findings(mod, monkeypatch) -> list[dict]:
+    monkeypatch.setattr(mod, "TODAY", HUB_TODAY)
+    return [f for f in run(mod, monkeypatch) if f["type"] == "hub_lag"]
+
+
+def test_hub_lag_flags_a_quiet_entity_a_newer_page_links(lint_module, tmp_path, monkeypatch):
+    write(tmp_path / "entities/hub.md", graph_page("hub", fm="updated: 2026-01-10\n"))
+    write(tmp_path / "sources/new.md", graph_page("new", "source", fm="updated: 2026-02-01\n") + "[[hub]]\n")
+    write(tmp_path / "sources/old.md", graph_page("old", "source", fm="updated: 2026-01-05\n") + "[[hub]]\n")
+    assert hub_findings(lint_module, monkeypatch) == [{
+        "type": "hub_lag", "path": "entities/hub.md", "last_change": "2026-01-10", "quiet_days": 50,
+        "newer_linkers": 1, "read_first": ["sources/new.md"]}]
+
+
+def test_hub_lag_counts_a_typed_relation_as_a_link(lint_module, tmp_path, monkeypatch):
+    write(tmp_path / "entities/hub.md", graph_page("hub", fm="updated: 2026-01-10\n"))
+    write(tmp_path / "entities/new.md", graph_page("new", fm='updated: 2026-02-01\nrelations:\n  related_to: "[[hub]]"\n'))
+    assert [f["read_first"] for f in hub_findings(lint_module, monkeypatch)] == [["entities/new.md"]]
+
+
+@pytest.mark.parametrize("hub_fm, hub_dir", [
+    ("updated: 2026-02-20\n", "entities"),            # changed 9 days ago: not quiet yet
+    ("updated: 2026-01-10\nstatus: superseded\n", "entities"),
+    ("updated: 2026-01-10\nstatus: closed\n", "entities"),
+    ("updated: 2026-01-10\nindex: false\n", "entities"),
+    ("updated: 2026-01-10\n", "sources"),             # only entity pages are hubs
+])
+def test_hub_lag_skips_pages_that_are_not_quiet_living_entities(lint_module, tmp_path, monkeypatch, hub_fm, hub_dir):
+    write(tmp_path / f"{hub_dir}/hub.md", graph_page("hub", fm=hub_fm))
+    write(tmp_path / "entities/new.md", graph_page("new", fm="updated: 2026-02-25\n") + "[[hub]]\n")
+    assert hub_findings(lint_module, monkeypatch) == []
+
+
+def test_hub_lag_keeps_an_evergreen_page(lint_module, tmp_path, monkeypatch):
+    # The 90-day age check skips evergreen pages; drift does not.
+    write(tmp_path / "entities/hub.md", graph_page("hub", fm="updated: 2026-01-10\nstatus: evergreen\n"))
+    write(tmp_path / "entities/new.md", graph_page("new", fm="updated: 2026-02-01\n") + "[[hub]]\n")
+    assert [f["path"] for f in hub_findings(lint_module, monkeypatch)] == ["entities/hub.md"]
+
+
+@pytest.mark.parametrize("linker", ["hot.md", "index.md", "overview.md", "folds/fold-1.md", "meta/lint-report.md"])
+def test_hub_lag_ignores_pages_that_only_name_hubs(lint_module, tmp_path, monkeypatch, linker):
+    write(tmp_path / "entities/hub.md", graph_page("hub", fm="updated: 2026-01-10\n"))
+    write(tmp_path / linker, graph_page("nav", "meta", fm="updated: 2026-02-01\n") + "[[hub]]\n")
+    assert hub_findings(lint_module, monkeypatch) == []
+
+
+def test_brief_never_reads_git_and_skips_hub_lag(lint_module, tmp_path, monkeypatch):
+    write(tmp_path / "entities/hub.md", graph_page("hub", fm="updated: 2026-01-10\n") + "[[new]]\n")
+    write(tmp_path / "entities/new.md", graph_page("new", fm="updated: 2026-02-01\n") + "[[hub]]\n")
+    def no_git(*a, **k):
+        raise AssertionError("--brief ran a subprocess")
+    monkeypatch.setattr(lint_module.subprocess, "run", no_git)
+    monkeypatch.setattr(lint_module, "TODAY", HUB_TODAY)
+    assert brief(lint_module, monkeypatch) == []
+
+
+def git(root: Path, *args: str, day: str | None = None):
+    import os, subprocess
+    env = {**os.environ, "GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_NOSYSTEM": "1"}
+    if day:
+        env.update(GIT_AUTHOR_DATE=f"{day}T12:00:00", GIT_COMMITTER_DATE=f"{day}T12:00:00")
+    subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@example.invalid", "-c", "commit.gpgsign=false",
+                    *args], cwd=root, env=env, check=True, capture_output=True)
+
+
+def commit(root: Path, path: str, text: str, day: str):
+    write(root / path, text)
+    git(root, "add", path)
+    git(root, "commit", "-q", "-m", f"{path} on {day}", day=day)
+
+
+def test_hub_lag_dates_a_page_by_git_and_reads_the_naming_page_first(lint_module, tmp_path, monkeypatch):
+    # The vault root is its own repository; pages live under wiki/.
+    monkeypatch.setattr(lint_module, "VAULT", tmp_path / "wiki")
+    git(tmp_path, "init", "-q")
+    commit(tmp_path, "wiki/sources/a.md", graph_page("a", "source") + "[[hub]]\n", "2026-01-20")
+    # The hub's frontmatter lags its last commit: git wins, so a (01-20) is older.
+    commit(tmp_path, "wiki/entities/hub.md", graph_page("hub", fm="updated: 2026-01-01\n"), "2026-01-25")
+    commit(tmp_path, "wiki/sources/b.md", graph_page("b", "source") + "[[hub]]\nThe hub moved on.\n", "2026-02-10")
+    commit(tmp_path, "wiki/sources/c.md", graph_page("c", "source") + "[[hub]]\n", "2026-02-12")
+    commit(tmp_path, "wiki/sources/c.md", graph_page("c", "source") + "[[hub]]\nunrelated\n", "2026-02-14")
+    [f] = hub_findings(lint_module, monkeypatch)
+    assert (f["last_change"], f["newer_linkers"]) == ("2026-01-25", 2)
+    # b's added lines name the hub twice (the link and the sentence), c's once
+    # (its link, added on 02-12): b comes first though it is older.
+    assert f["read_first"] == ["sources/b.md", "sources/c.md"]
+    # An uncommitted edit dates a page today: a joins the newer linking pages.
+    write(tmp_path / "wiki/sources/a.md", graph_page("a", "source") + "[[hub]]\nedited\n")
+    [f] = hub_findings(lint_module, monkeypatch)
+    assert f["newer_linkers"] == 3 and f["read_first"][-1] == "sources/a.md"
+
+
+def test_hub_lag_treats_a_vault_inside_another_repository_as_without_git(lint_module, tmp_path, monkeypatch):
+    # tmp_path is the repository; the vault root (tmp_path/vault) is not its top.
+    monkeypatch.setattr(lint_module, "VAULT", tmp_path / "vault" / "wiki")
+    git(tmp_path, "init", "-q")
+    commit(tmp_path, "vault/wiki/entities/hub.md", graph_page("hub", fm="updated: 2026-01-10\n"), "2026-02-20")
+    commit(tmp_path, "vault/wiki/sources/a.md", graph_page("a", "source", fm="updated: 2026-02-01\n") + "[[hub]]\n", "2026-02-21")
+    # Frontmatter dates only: the hub (01-10) is quiet and a (02-01) is newer.
+    assert [f["last_change"] for f in hub_findings(lint_module, monkeypatch)] == ["2026-01-10"]

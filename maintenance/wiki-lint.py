@@ -14,16 +14,20 @@ Findings:
 - relation_unknown_predicate: a `relations:` key outside the typed-graph vocabulary
 - relation_missing_inverse: an edge between two entity/source pages whose
   inverse predicate is not declared on the target page
+- hub_lag [info]: a living entity page unchanged for 14+ days while a page
+  that links it changed after it; `read_first` lists the newer linking pages,
+  those whose lines added since then name or link it first (full mode only:
+  it reads git)
 
 --brief prints one line per finding except the age/size ones (stale,
-hot_oversize, log_oversize), nothing when there are none: the form a
+hot_oversize, log_oversize, hub_lag), nothing when there are none: the form a
 session-start hook can show as is. `--brief --only PAGE...` keeps the findings
 that involve those pages (as path, referrer or declaring page; `wiki/` prefix
 optional): the form a hook uses for the pages a session just changed.
 """
 from __future__ import annotations
 import os
-import json, re, sys, hashlib
+import json, re, sys, hashlib, subprocess
 from datetime import date, datetime
 from pathlib import Path
 
@@ -61,7 +65,7 @@ GRAPH_TYPES = {"entity", "source"}
 REL_KEY = re.compile(r"^(\s+)([A-Za-z_][\w-]*):(.*)$")
 # Age and size findings are maintenance signals, not write errors: --brief skips them.
 # hot_oversize has its live alarm in the SessionStart and Stop hooks anyway.
-BRIEF_SKIP = {"stale", "hot_oversize", "log_oversize"}
+BRIEF_SKIP = {"stale", "hot_oversize", "log_oversize", "hub_lag"}
 # Statuses the age check skips: evergreen by declaration, plus every status
 # that already marks a page as no longer current (the same set as
 # scripts/contextual-prefix.py STALE_STATUSES).
@@ -71,6 +75,93 @@ AGELESS_STATUSES = {"evergreen", "archived", "superseded", "deprecated", "closed
 # (2.1.310: 10,000 whole, 10,001 preview). Bytes track that limit, lines do not:
 # 80 lines of prose already pass it. 7 KB leaves room for what the hook appends.
 HOT_MAX_BYTES = 7168
+# Hub lag (since 2026-11-28): a living entity page left unchanged for
+# HUB_QUIET_DAYS while a page that links it changed after it. That is where a
+# new fact lands beside the page that should carry it: a version recorded on
+# an overview page only, a rule changed where it was decided but not on its
+# policy page, an audit's state never carried to the project it audited. On
+# its first run, of 12 such pages 7 held stale or missing state, and one of
+# those had fewer than three newer linking pages, so one is enough. A page's
+# date is its last commit, or its `updated:` when later, or today when it has
+# uncommitted changes; a hub reviewed and found current clears by a bump of
+# its `updated:`. Info only, and computed in full mode only: it reads git.
+HUB_DIRS = ("entities/",)
+HUB_QUIET_DAYS = 14
+HUB_MIN_NEWER = 1
+HUB_READ_FIRST = 8
+# Pages that name a hub without facts about it: navigation, the hot cache, the
+# frozen log, folds and generated reports.
+HUB_LINKER_SKIP = re.compile(r"^(hot|log|index|overview)\.md$|^folds/|^meta/(lint-report|tiling-report)")
+NOT_CURRENT_STATUSES = AGELESS_STATUSES - {"evergreen"}
+
+def fm_date(fm: dict) -> date | None:
+    """The frontmatter `updated:` as a date (a timestamp's day), None when absent or unreadable."""
+    u = fm.get("updated")
+    if not u:
+        return None
+    try:
+        return datetime.fromisoformat(u).date() if "T" in u else date.fromisoformat(u)
+    except ValueError:
+        return None
+
+def _git(root: Path, *args: str) -> subprocess.CompletedProcess:
+    return subprocess.run(["git", "-C", str(root), *args], capture_output=True, text=True, timeout=60)
+
+def git_page_dates(root: Path, wiki_rel: str) -> tuple[dict[str, date], set[str]] | None:
+    """Each page's last commit date and the pages with uncommitted changes,
+    keyed by their path under the wiki directory, from one `git log` and one
+    `git status`. None when the vault root is not the top of its own repository
+    (no git, or a directory inside another repository): the dates then come
+    from frontmatter only."""
+    try:
+        top = _git(root, "rev-parse", "--show-toplevel")
+        if top.returncode != 0 or Path(top.stdout.strip()).resolve() != root.resolve():
+            return None
+        log = _git(root, "log", "--format=%x00%cs", "--name-only", "--", wiki_rel)
+        status = _git(root, "status", "--porcelain", "--untracked-files=all", "--", wiki_rel)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if log.returncode != 0 or status.returncode != 0:
+        return None
+    prefix = wiki_rel + "/"
+    last: dict[str, date] = {}
+    for block in log.stdout.split("\x00")[1:]:
+        lines = block.strip().splitlines()
+        if not lines:
+            continue
+        day = date.fromisoformat(lines[0])
+        for path in lines[1:]:
+            if path.startswith(prefix):
+                last.setdefault(path[len(prefix):], day)
+    dirty = set()
+    for line in status.stdout.splitlines():
+        path = line[3:].split(" -> ")[-1].strip('"')
+        if path.startswith(prefix):
+            dirty.add(path[len(prefix):])
+    return last, dirty
+
+def added_mentions(root: Path, wiki_rel: str, since: date, name: str, paths: list[str]) -> dict[str, int]:
+    """Per page, the lines it gained after `since` that name or link `name`:
+    one `git diff` from the last commit of that day to the working tree. Empty
+    when no commit is that old or git fails."""
+    try:
+        base = _git(root, "rev-list", "-1", f"--before={since.isoformat()} 23:59:59", "HEAD").stdout.strip()
+        if not base:
+            return {}
+        diff = _git(root, "diff", "--unified=0", "--no-color", "--no-ext-diff", base, "--",
+                    *(f"{wiki_rel}/{p}" for p in paths))
+    except (OSError, subprocess.TimeoutExpired):
+        return {}
+    word = re.compile(rf"(?<![\w-]){re.escape(name)}(?![\w-])", re.IGNORECASE)
+    head = f"+++ b/{wiki_rel}/"
+    counts: dict[str, int] = {}
+    cur = None
+    for line in diff.stdout.splitlines():
+        if line.startswith("+++ "):
+            cur = line[len(head):] if line.startswith(head) else None
+        elif line.startswith("+") and cur and word.search(line):
+            counts[cur] = counts.get(cur, 0) + 1
+    return counts
 
 def parse_fm(text: str) -> dict:
     m = FRONTMATTER.match(text)
@@ -253,12 +344,8 @@ def main(brief: bool = False, only: set[str] | None = None):
             continue
         if str(fm.get("index", "")).lower() == "false" or rel.startswith("folds/"):
             continue
-        u = fm.get("updated")
-        if not u:
-            continue
-        try:
-            d = datetime.fromisoformat(u).date() if "T" in u else date.fromisoformat(u)
-        except ValueError:
+        d = fm_date(fm)
+        if d is None:
             continue
         age = (TODAY - d).days
         if age > 90:
@@ -308,6 +395,45 @@ def main(brief: bool = False, only: set[str] | None = None):
             if f["type"] not in BRIEF_SKIP and (only is None or involves(f) & only):
                 print(brief_line(f))
         return
+
+    # Hub lag (HUB_QUIET_DAYS above). Links count from the body and from the
+    # typed relations alike; the hub's own links to itself do not.
+    root, wiki_rel = VAULT.parent, VAULT.name
+    git = git_page_dates(root, wiki_rel)
+    def rel_of(p: Path) -> str:
+        return p.relative_to(VAULT).as_posix()
+    def page_date(p: Path) -> date | None:
+        if git and rel_of(p) in git[1]:
+            return TODAY
+        days = [d for d in (git[0].get(rel_of(p)) if git else None, fm_date(fm_cache[p])) if d]
+        return max(days) if days else None
+    dates = {p: page_date(p) for p in pages}
+    inbound: dict[Path, set[Path]] = {}
+    for tgt, refs in targets.items():
+        q = resolve(tgt)
+        if q is not None:
+            inbound.setdefault(q, set()).update(r for r in refs if r != q)
+    for p in pages:
+        for tgts in rel_cache[p].values():
+            for t in tgts:
+                q = resolve(t)
+                if q is not None and q != p:
+                    inbound.setdefault(q, set()).add(p)
+    for p in sorted(pages):
+        rel, fm, hd = rel_of(p), fm_cache[p], dates[p]
+        if not rel.startswith(HUB_DIRS) or (fm.get("status") or "").strip().lower() in NOT_CURRENT_STATUSES:
+            continue
+        if str(fm.get("index", "")).lower() == "false" or hd is None or (TODAY - hd).days < HUB_QUIET_DAYS:
+            continue
+        newer = [q for q in inbound.get(p, ()) if dates[q] is not None and dates[q] > hd
+                 and not HUB_LINKER_SKIP.match(rel_of(q))]
+        if len(newer) < HUB_MIN_NEWER:
+            continue
+        counts = added_mentions(root, wiki_rel, hd, slug(p), sorted(rel_of(q) for q in newer)) if git else {}
+        newer.sort(key=lambda q: (-counts.get(rel_of(q), 0), -dates[q].toordinal(), rel_of(q)))
+        findings.append({"type": "hub_lag", "path": rel, "last_change": hd.isoformat(),
+                         "quiet_days": (TODAY - hd).days, "newer_linkers": len(newer),
+                         "read_first": [rel_of(q) for q in newer[:HUB_READ_FIRST]]})
 
     hot = VAULT / "hot.md"
     if hot.exists():
