@@ -6,7 +6,7 @@ The code that runs Claude's long-term memory: retrieval, maintenance, ideation, 
 
 - Every script finds its own siblings relative to itself and the vault through **`WIKI_VAULT`** (default `~/projects/knowledge-vault`): `wiki/`, `.vault-meta/` (index, address counter, locks, the maintenance and learning rounds' date markers `last-maintenance` and `last-learning`), `eval/goldset*.json`, `maintenance/dream-ledger.jsonl`, `wiki/.lint/` and the `.git/wiki-*` markers all live in the vault.
 - **A mistyped `WIKI_VAULT` fails before anything is written**: with no `wiki/` there, `allocate-address.sh` and `wiki-maintenance.sh` exit 4, `contextual-prefix.py` 5, `bm25-index.py build` checks its chunks before the lock (exit 4) and `retrieve.py` exits 10, so the path cannot become an empty vault with its own address counter (`maintenance/tests/test_missing_vault.py`). `semantic-scan.py` and `dream.py` stop first on the missing embed cache (exit 2). Not covered: `rerank.py` and `tiling-check.py` can create `.vault-meta/` under a wrong root, which none of these checks trusts. A new writer checks first.
-- Callers: the dotfiles hooks (`wiki-autocommit.sh` refreshes the index, embeds every chunk with no vector yet on every pass, not only after its own refresh, and writes the consolidation-due list, `wiki-hot-cache.sh` probes the embedder and shows `wiki-lint.py --brief`, the `UserPromptSubmit` recall hook, `wiki-stop-check.sh` runs `wiki-lint.py --brief --only` and `fm-validate.py` on the pages a session changed, committed or not), the `save` skill (symlinked into `~/.claude/skills/` by chezmoi), `vault-explorer`'s Recall lens, and Claude's read protocol in `~/.claude/CLAUDE.md`.
+- Callers: the dotfiles hooks (`wiki-autocommit.sh` refreshes the index, embeds every chunk with no vector yet on every pass, not only after its own refresh, and writes the consolidation-due list, `wiki-hot-cache.sh` probes the embedder and shows `wiki-lint.py --brief`, the `UserPromptSubmit` recall hook, `wiki-stop-check.sh` runs `wiki-lint.py --brief --only` and `fm-validate.py` on the pages a session changed, committed or not), the `save` and `vault-rounds` skills (symlinked into `~/.claude/skills/` by chezmoi), `vault-explorer`'s Recall lens, and Claude's read protocol in `~/.claude/CLAUDE.md`.
 
 ## Layout
 
@@ -14,7 +14,7 @@ The code that runs Claude's long-term memory: retrieval, maintenance, ideation, 
 scripts/       retrieval: contextual-prefix (chunks), bm25-index, rerank (local llama-embedding), retrieve, recall hook; catalog (every page with its description, from frontmatter: the read protocol's fallback); address helper; endpoint-guard
 maintenance/   wiki-maintenance.sh (autofix → lint, no model since 2026-11-12), fm-validate, semantic-scan, dream + dream-claude.workflow.js, consolidation-due; tests/; README.md (the jobs are on demand: run by hand, no timers)
 eval/          run-eval.py (the gate), neighbors.py (where the answer sits when the right page returns the wrong chunk) — the gold sets they read are vault data
-skills/        save (live), wiki-fold (retired record); wiki-apply was removed on 2026-11-12 with the proposal pass it applied
+skills/        save (live), vault-rounds (live since 2026-11-28: maintenance, learning and dream by name, on demand, never a timer's entry point), wiki-fold (retired record); wiki-apply was removed on 2026-11-12 with the proposal pass it applied
 ```
 
 ## Public repo (since 2026-10-07)
